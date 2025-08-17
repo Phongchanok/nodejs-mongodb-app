@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>แผงควบคุมแอดมิน | กระเป๋าเครดิต</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="card">
+      <h3>⚙️ แผงควบคุมแอดมิน</h3>
+    <p id="welcome"></p>
+    <h3>ผู้ใช้ทั้งหมด</h3>
+    <table id="users-table">
+        <thead>
+          <tr>
+            <th>ชื่อ</th>
+            <th>รหัสพนักงาน</th>
+            <th>บทบาท</th>
+            <th>เครดิต</th>
+            <th>ปรับเครดิต</th>
+        </tr>
+      </thead>
+      <tbody id="users-body">
+      </tbody>
+    </table>
+    <!-- ปุ่มสำหรับแอดมินในการสรุปรายการผู้ใช้ทั้งหมดและดาวน์โหลดเป็นไฟล์ CSV -->
+    <button id="exportBtn" class="btn-secondary mt-2">📊สรุปยอด (CSV)</button>
+
+    <h3 style="margin-top:2rem;">📁นำเข้าข้อมูลพนักงานจากไฟล์ CSV</h3>
+    <form id="importForm" enctype="multipart/form-data" style="margin-bottom:1rem;">
+      <input type="file" name="file" accept=".csv" required />
+      <button type="submit" class="btn-secondary">นำเข้า</button>
+    </form>
+
+    <h3>🏪สร้างบัญชีร้านค้า</h3>
+    <label>ชื่อผู้ใช้ร้านค้า:</label>
+    <input type="text" id="merchantUsername" placeholder="username" />
+    <label>รหัสผ่าน:</label>
+    <input type="password" id="merchantPassword" placeholder="password" />
+    <button id="createMerchantBtn">สร้างร้านค้า</button>
+
+    <button id="logoutBtn" style="display:block;margin-top:2rem;">ออกจากระบบ</button>
+  </div>
+
+  <script>
+    // Fetch current user info to ensure the correct role
+    fetch('/api/me')
+      .then(res => {
+        if (!res.ok) {
+          window.location.href = '/login.html';
+        }
+        return res.json();
+      })
+      .then(user => {
+        if (user.role !== 'admin') {
+          // Redirect if not admin
+          window.location.href = `/${user.role}.html`;
+          return;
+        }
+        document.getElementById('welcome').textContent = `สวัสดี ${user.username}!`;
+        loadUsers();
+      });
+
+    // Load all users into the table
+    function loadUsers() {
+      fetch('/api/users')
+        .then(res => res.json())
+        .then(users => {
+          const tbody = document.getElementById('users-body');
+          tbody.innerHTML = '';
+          users.forEach(u => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td>${u.name || ''}</td>
+              <td>${u.username}</td>
+              <td>${u.role}</td>
+              <td>${u.credit}</td>
+              <td class="user-row">
+                <input type="number" value="${u.credit}" min="0" />
+                <button data-id="${u._id}">อัปเดต</button>
+              </td>
+            `;
+            tbody.appendChild(tr);
+          });
+          // Add event listeners after rendering
+          document.querySelectorAll('button[data-id]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+              const userId = btn.getAttribute('data-id');
+              const input = btn.parentElement.querySelector('input');
+              const newCredit = parseFloat(input.value);
+              if (isNaN(newCredit)) {
+                alert('กรุณากรอกจำนวนเครดิตที่ถูกต้อง');
+                return;
+              }
+              fetch(`/api/users/${userId}/credit`, {
+                method: 'PUT',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ credit: newCredit })
+              })
+                .then(res => {
+                  if (!res.ok) {
+                    return res.text().then(text => { throw new Error(text); });
+                  }
+                  return res.json();
+                })
+                .then(updated => {
+                  alert(`ปรับเครดิตของ ${updated.username} สำเร็จ`);
+                  loadUsers();
+                })
+                .catch(err => alert(`เกิดข้อผิดพลาด: ${err.message}`));
+            });
+          });
+        })
+        .catch(err => console.error(err));
+    }
+
+    // Logout handling
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+      fetch('/logout')
+        .then(() => {
+          window.location.href = '/login.html';
+        });
+    });
+
+    // Export summary handling
+    document.getElementById('exportBtn').addEventListener('click', () => {
+      // Trigger download of the Excel summary for all users.  Navigating
+      // directly to the API endpoint will prompt the browser to
+      // download the generated .xlsx file.
+      window.location.href = '/api/export-users';
+    });
+
+    // Import employees from CSV
+    document.getElementById('importForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const formData = new FormData(this);
+      try {
+        const res = await fetch('/api/import-employees', {
+          method: 'POST',
+          body: formData
+        });
+        const text = await res.text();
+        if (!res.ok) {
+          throw new Error(text);
+        }
+        alert(text);
+        // Refresh user list after import
+        loadUsers();
+      } catch (err) {
+        alert(`เกิดข้อผิดพลาด: ${err.message}`);
+      }
+    });
+
+    // Create merchant account
+    document.getElementById('createMerchantBtn').addEventListener('click', async () => {
+      const username = document.getElementById('merchantUsername').value.trim();
+      const password = document.getElementById('merchantPassword').value;
+      if (!username || !password) {
+        alert('กรุณากรอกชื่อผู้ใช้และรหัสผ่านของร้านค้า');
+        return;
+      }
+      try {
+        const res = await fetch('/register', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: new URLSearchParams({ username, password, role: 'merchant' }).toString()
+        });
+        const text = await res.text();
+        if (!res.ok) {
+          throw new Error(text);
+        }
+        alert(text);
+        document.getElementById('merchantUsername').value = '';
+        document.getElementById('merchantPassword').value = '';
+        // reload users to show new merchant
+        loadUsers();
+      } catch (err) {
+        alert(`เกิดข้อผิดพลาด: ${err.message}`);
+      }
+    });
+  </script>
+</body>
+</html>

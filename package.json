@@ -1,0 +1,20 @@
+{
+  "name": "wallet-app",
+  "version": "1.0.0",
+  "description": "Simple credit wallet web app with login and role-based access",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.0",
+    "connect-mongo": "^4.6.0",
+    "csv-parse": "^5.6.0",
+    "dotenv": "^16.0.0",
+    "express": "^4.18.2",
+    "express-session": "^1.17.3",
+    "mongoose": "^6.10.0",
+    "multer": "^1.4.5-lts.1",
+    "qrcode": "^1.5.0"
+  }
+}

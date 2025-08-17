@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>กระเป๋าผู้ใช้ | กระเป๋าเครดิต</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="container admin-container">
+  <h2>🏦 ระบบกระเป๋าเครดิต</h2>
+   <div class="card">
+      <h3>👤 หน้าผู้ใช้งาน</h3>
+    <div id="greeting">สวัสดี นายสมชาย ใจดี!</div>
+    <p id="balance">ยอดคงเหลือ: ...</p>
+
+    <h3>สร้าง QR Code สำหรับโอนเครดิต</h3>
+    <label for="amount">จำนวนเครดิตที่ต้องการโอน</label>
+    <input type="number" id="amount" min="1" placeholder="จำนวนเครดิต">
+    <button id="generateBtn">สร้าง QR Code</button>
+    <div id="qrContainer" style="margin-top:1rem;"></div>
+
+    <button id="logoutBtn">ออกจากระบบ</button>
+
+  </div>
+
+  <script>
+    // Fetch the logged-in user info and update the page
+    let currentUser = null;
+    fetch('/api/me')
+      .then(response => {
+        if (!response.ok) {
+          // If the user is not authenticated, redirect to login
+          window.location.href = '/login.html';
+        }
+        return response.json();
+      })
+      .then(user => {
+        currentUser = user;
+        // Show the user's full name if available, otherwise fall back
+        // to the username. Employee accounts imported from CSV will
+        // have a name field that we prefer to display.
+        const displayName = user.name || user.username;
+        document.getElementById('greeting').textContent = `สวัสดี ${displayName}!`;
+        document.getElementById('balance').textContent = `ยอดคงเหลือ: ${user.credit} เครดิต`;
+      })
+      .catch(err => {
+        console.error(err);
+      });
+
+    // Generate QR Code when user clicks the button
+    document.getElementById('generateBtn').addEventListener('click', () => {
+      const amount = document.getElementById('amount').value;
+      if (!amount || parseFloat(amount) <= 0) {
+        alert('กรุณากรอกจำนวนเครดิตที่ถูกต้อง');
+        return;
+      }
+      // Prevent generating QR if amount exceeds current credit
+      const num = parseFloat(amount);
+      if (currentUser && num > currentUser.credit) {
+        alert('จำนวนเครดิตที่กรอกเกินยอดคงเหลือของคุณ');
+        return;
+      }
+      fetch('/api/generate-qr', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ amount })
+      })
+        .then(res => {
+          if (!res.ok) {
+            return res.text().then(text => { throw new Error(text); });
+          }
+          return res.json();
+        })
+        .then(data => {
+          const container = document.getElementById('qrContainer');
+          container.innerHTML = '';
+          const img = document.createElement('img');
+          img.src = data.qrDataUri;
+          img.alt = 'QR Code';
+          img.style.maxWidth = '200px';
+          container.appendChild(img);
+        })
+        .catch(err => alert(`เกิดข้อผิดพลาด: ${err.message}`));
+    });
+
+    // Attach logout event
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+      fetch('/logout')
+        .then(() => {
+          window.location.href = '/login.html';
+        });
+    });
+  </script>
+</body>
+</html>

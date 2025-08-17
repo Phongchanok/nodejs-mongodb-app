@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>เข้าสู่ระบบ | กระเป๋าเครดิต</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="container">
+    <h2>เข้าสู่ระบบ</h2>
+    <!--
+      Login form.
+
+      Note: instead of submitting the form directly to the server (which
+      would cause a full page reload and make it difficult to handle
+      authentication errors), we intercept the submit event via
+      JavaScript. When the user clicks the submit button the handler
+      sends a POST request to the server using the Fetch API. If the
+      credentials are correct the server will respond with a 302
+      redirect. We capture the Location header and navigate the browser
+      there. When the credentials are incorrect the server responds
+      with a 401 status and a plain‑text error message, which we
+      surface as an alert.
+    -->
+    <form id="loginForm">
+      <label for="username">ชื่อผู้ใช้</label>
+      <input type="text" id="username" name="username" required>
+
+      <label for="password">รหัสผ่าน</label>
+      <input type="password" id="password" name="password" required>
+
+      <button type="submit">เข้าสู่ระบบ</button>
+    </form>
+    <div class="link">
+      <p>หากคุณยังไม่มีบัญชี กรุณาติดต่อผู้ดูแลระบบ</p>
+    </div>
+  </div>
+
+  <script>
+    // Intercept the login form submission to handle errors without
+    // triggering a full page reload. Using Fetch API with
+    // redirect: 'manual' allows us to detect 302 redirects from the
+    // server. On success we navigate to the redirected location; on
+    // failure we display the server's error message to the user.
+    document.getElementById('loginForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      if (!username || !password) {
+        alert('กรุณากรอกชื่อผู้ใช้และรหัสผ่าน');
+        return;
+      }
+      const body = new URLSearchParams({ username, password });
+      // Submit the login credentials. We use redirect:'manual' to avoid
+      // automatically following the redirect returned by the server when
+      // authentication succeeds. The fetch API marks such responses
+      // with type 'opaqueredirect'. If we detect a redirect we simply
+      // navigate to the root route (/) which in turn will redirect
+      // the user to the appropriate dashboard based on the session.
+      fetch('/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body,
+        redirect: 'manual',
+        credentials: 'same-origin'
+      })
+        .then(async (res) => {
+          // If the response is an opaque redirect (i.e. a 302 from
+          // Express) treat it as a successful login and forward the
+          // browser to the root route. The server will then redirect
+          // based on the stored session.
+          if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) {
+            window.location.href = '/';
+            return;
+          }
+          // Otherwise extract the error message and show it to the user
+          const text = await res.text();
+          alert(text || 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
+        })
+        .catch((err) => {
+          console.error('Login error', err);
+          alert('ไม่สามารถเข้าสู่ระบบได้ กรุณาลองใหม่');
+        });
+    });
+  </script>
+</body>
+</html>
