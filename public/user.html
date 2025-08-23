@@ -95,7 +95,7 @@
     // ---- Utilities สำหรับ base64url -> JSON (ใช้บนเบราว์เซอร์) ----
     function base64UrlToJson(b64url) {
       const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/')
-        + '==='.slice((b64url.length + 3) % 4); // เติม padding ให้ครบ
+        + '==='.slice((b64url.length + 3) % 4); // padding ให้ครบ
       const text = atob(b64);
       return JSON.parse(text);
     }
@@ -156,7 +156,7 @@
         document.getElementById('payBox').style.display = 'block';
       };
 
-      const onScanFailure = () => { /* ละไว้ – ไลบรารีจะสแกนต่อเนื่องเอง */ };
+      const onScanFailure = () => { /* สแกนต่อเนื่อง */ };
 
       try {
         await qrScanner.start(
@@ -197,7 +197,7 @@
         window.currentUser = me;
         document.getElementById('balance').textContent = `ยอดคงเหลือ: ${me.credit} เครดิต`;
 
-        // แสดง Modal สรุปผล (ชื่อร้าน, ยอดชำระ, เวลา, เครดิตคงเหลือ)
+        // แสดง Modal สรุปผล
         const timeText = new Date().toLocaleString('th-TH');
         openPaymentModal({
           merchantName: lastMerchantName || lastMerchantId,
