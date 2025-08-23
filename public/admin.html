@@ -108,7 +108,7 @@
                 })
                 .then(updated => {
                   alert(`ปรับเครดิตของ ${updated.username} สำเร็จ`);
-                  loadUsers();
+                  loadUsers(); // รีโหลดรายการเพื่ออัปเดตค่าบนหน้า
                 })
                 .catch(err => alert(`เกิดข้อผิดพลาด: ${err.message}`));
             });
@@ -175,6 +175,7 @@
           throw new Error(text);
         }
         alert(text);
+        // ล้างฟอร์มแล้วรีโหลดผู้ใช้
         document.getElementById('merchantUsername').value = '';
         document.getElementById('merchantPassword').value = '';
         // reload users to show new merchant

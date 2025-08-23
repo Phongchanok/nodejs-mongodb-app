@@ -8,9 +8,14 @@
 </head>
 <body>
     <div class="container">
-    <div id="greeting">ยินดีต้อนรับร้านค้า ABC!</div>
-    <div id="balance">ยอดคงเหลือ: ... เครดิต</div>
-    <h3>รับเครดิตผ่าน QR Code</h3>
+      <div id="greeting">ยินดีต้อนรับร้านค้า ABC!</div>
+      <div id="balance">ยอดคงเหลือ: ... เครดิต</div>
+      <h3>QR สำหรับรับเครดิต</h3>
+      <button id="genQrBtn">สร้าง/รีเฟรช QR ร้าน</button>
+      <div id="qrContainer" style="margin-top:1rem;"></div>
+
+      <button id="logoutBtn">ออกจากระบบ</button>
+    </div>
 
     <!--
       The merchant can scan a QR code directly with their device's camera.
@@ -19,7 +24,7 @@
       corresponding payload is automatically sent to the server to
       redeem the credit. This removes the need to paste the JSON
       payload manually.
-    -->
+    
     <button id="scanBtn">📷 เปิดกล้องเพื่อสแกน QR</button>
 
     <div id="qr-reader" style="width: 300px; display: none; margin-top: 1rem;"></div>
@@ -28,6 +33,7 @@
 
     <button id="logoutBtn">ออกจากระบบ</button>
   </div>
+    -->
 
   <!-- Load html5-qrcode library from CDN to enable in‑browser QR scanning. 
        This script defines the Html5Qrcode class used below. -->
@@ -60,6 +66,25 @@
         });
     });
 
+    // เพิ่มปุ่มสร้าง QR:
+  document.getElementById('genQrBtn').addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/merchant-qr', { method: 'POST' });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      const img = document.createElement('img');
+      img.src = data.qrDataUri;
+      img.alt = 'Merchant QR';
+      img.style.maxWidth = '220px';
+      const box = document.getElementById('qrContainer');
+      box.innerHTML = '';
+      box.appendChild(img);
+    } catch (err) {
+      alert('สร้าง QR ไม่สำเร็จ: ' + err.message);
+    }
+  });
+    
+    /**
     // QR code scanning functionality
     let qrScanner;
     let scanning = false;
@@ -136,6 +161,7 @@
         alert('ไม่สามารถเปิดกล้องได้: ' + err);
       });
     });
+    */
   </script>
 </body>
 </html>

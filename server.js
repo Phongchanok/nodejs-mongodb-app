@@ -255,7 +255,7 @@ app.get('/api/users', ensureAuthenticated, ensureRole('admin'), async (req, res)
  * includes the data URI that can be used as the source of an <img>
  * element. Only authenticated users may generate QR codes.
  */
-app.post('/api/generate-qr', ensureAuthenticated, async (req, res) => {
+/**app.post('/api/generate-qr', ensureAuthenticated, async (req, res) => {
   const { amount } = req.body;
   const value = parseFloat(amount);
   if (isNaN(value) || value <= 0) {
@@ -273,7 +273,83 @@ app.post('/api/generate-qr', ensureAuthenticated, async (req, res) => {
     console.error('Error generating QR code:', err);
     res.status(500).send('Error generating QR code');
   }
+});*/
+
+// POST /api/merchant-qr  (merchant-only)
+// ตอบกลับเป็น data URI สำหรับ <img src="..."> ได้เลย
+app.post('/api/merchant-qr', ensureAuthenticated, ensureRole('merchant'), async (req, res) => {
+  try {
+    const payload = {
+      type: 'merchant-receive',
+      to: req.session.userId, // ร้านค้าปัจจุบัน
+      v: 1,                    // เวอร์ชัน payload เผื่อเปลี่ยนสคีมาในอนาคต
+      ts: Date.now()
+    };
+    const qrDataUri = await QRCode.toDataURL(JSON.stringify(payload));
+    res.json({ qrDataUri });
+  } catch (err) {
+    console.error('Error generating merchant QR:', err);
+    res.status(500).send('Error generating merchant QR');
+  }
 });
+
+// POST /api/pay-qr  (user-only)
+app.post('/api/pay-qr', ensureAuthenticated, ensureRole('user'), async (req, res) => {
+  const { payload, amount } = req.body;
+  if (!payload) return res.status(400).send('Missing payload');
+
+  let data;
+  try { data = JSON.parse(payload); } catch { return res.status(400).send('Invalid payload'); }
+
+  if (data?.type !== 'merchant-receive' || !data?.to) {
+    return res.status(400).send('Invalid QR type or destination');
+  }
+
+  // amount ต้องเป็นจำนวนเต็มบวก
+  const value = Math.trunc(Number(amount));
+  if (!Number.isFinite(value) || value <= 0) {
+    return res.status(400).send('Invalid amount (ต้องเป็นจำนวนเต็มมากกว่า 0)');
+  }
+
+  // ป้องกันจ่ายให้ตัวเอง (ในกรณี user มี role merchant ด้วย – กันไว้เผื่อ)
+  if (String(data.to) === String(req.session.userId)) {
+    return res.status(400).send('ไม่สามารถจ่ายให้ตัวเองได้');
+  }
+
+  try {
+    const payer = await User.findById(req.session.userId);
+    const merchant = await User.findById(data.to);
+    if (!payer || !merchant) return res.status(404).send('User or merchant not found');
+    if (merchant.role !== 'merchant') return res.status(400).send('ปลายทางไม่ใช่ร้านค้า');
+
+    // เครดิตต้องพอ
+    if (payer.credit < value) return res.status(400).send('เครดิตไม่พอ');
+
+    // โอนแบบง่าย (ถ้าต้องกัน concurrent race: ใช้ transaction/atomic ops เพิ่มได้)
+    payer.credit -= value;
+    merchant.credit += value;
+    await payer.save();
+    await merchant.save();
+
+    await Transaction.create({
+      from: payer._id,
+      to: merchant._id,
+      amount: value,
+      timestamp: new Date(),
+      used: true
+    });
+
+    res.json({
+      message: 'ชำระสำเร็จ',
+      payerCredit: payer.credit,
+      merchantCredit: merchant.credit
+    });
+  } catch (err) {
+    console.error('Error paying via QR:', err);
+    res.status(500).send('Server error');
+  }
+});
+
 
 /**
  * POST /api/redeem-qr
@@ -287,7 +363,7 @@ app.post('/api/generate-qr', ensureAuthenticated, async (req, res) => {
  * prevent re-use of the QR code. Only merchants (and admins) may
  * redeem credits.
  */
-app.post('/api/redeem-qr', ensureAuthenticated, ensureRole('merchant'), async (req, res) => {
+/**app.post('/api/redeem-qr', ensureAuthenticated, ensureRole('merchant'), async (req, res) => {
   const { payload } = req.body;
   if (!payload) {
     return res.status(400).send('Missing payload');
@@ -343,7 +419,7 @@ app.post('/api/redeem-qr', ensureAuthenticated, ensureRole('merchant'), async (r
     console.error('Error redeeming QR code:', err);
     res.status(500).send('Server error');
   }
-});
+});*/
 
 /**
  * PUT /api/users/:id/credit
@@ -353,27 +429,50 @@ app.post('/api/redeem-qr', ensureAuthenticated, ensureRole('merchant'), async (r
  * the request body. The server responds with the updated user document
  * excluding the password hash.
  */
-app.put('/api/users/:id/credit', ensureAuthenticated, ensureRole('admin'), async (req, res) => {
-  const { id } = req.params;
-  const { credit } = req.body;
-  if (typeof credit === 'undefined') {
-    return res.status(400).send('Credit value required');
-  }
-  try {
-    const user = await User.findByIdAndUpdate(
-      id,
-      { credit },
-      { new: true, runValidators: true, context: 'query' }
-    ).select('-password').lean();
-    if (!user) {
-      return res.status(404).send('User not found');
+// แนะนำ: กำหนดเพดานบนที่เหมาะกับระบบของคุณ
+const MAX_CREDIT = 1_000_000; // ปรับตามนโยบายได้
+
+app.put('/api/users/:id/credit',
+  ensureAuthenticated,
+  ensureRole('admin'),
+  async (req, res) => {
+    const { id } = req.params;
+
+    // รับค่ามาเป็นอะไรก็ได้ (string/number) แล้ว normalize ให้เป็นจำนวนเต็ม
+    const incoming = req.body?.credit;
+    if (typeof incoming === 'undefined') {
+      return res.status(400).json({ message: 'ต้องระบุค่า credit' });
     }
-    res.json(user);
-  } catch (err) {
-    console.error('Error updating credit:', err);
-    res.status(500).send('Server error');
+
+    const normalized = Math.trunc(Number(incoming));
+
+    // ตรวจว่าเป็นจำนวนเต็มจริงและไม่ติดลบ/ไม่เกินเพดาน
+    if (!Number.isFinite(normalized) || normalized < 0) {
+      return res.status(400).json({ message: 'credit ต้องเป็นจำนวนเต็มตั้งแต่ 0 ขึ้นไป' });
+    }
+    if (normalized > MAX_CREDIT) {
+      return res.status(400).json({ message: `credit ต้องไม่เกิน ${MAX_CREDIT}` });
+    }
+
+    try {
+      const user = await User.findByIdAndUpdate(
+        id,
+        { $set: { credit: normalized } }, // ใช้ $set เพื่อชัดเจน
+        { new: true, runValidators: true, context: 'query' }
+      )
+      .select('-password')
+      .lean();
+
+      if (!user) {
+        return res.status(404).json({ message: 'ไม่พบผู้ใช้' });
+      }
+      return res.json(user);
+    } catch (err) {
+      console.error('Error updating credit:', err);
+      return res.status(500).json({ message: 'Server error' });
+    }
   }
-});
+);
 
 /**
  * GET /api/export-users
@@ -406,7 +505,7 @@ app.get('/api/export-users', ensureAuthenticated, ensureRole('admin'), async (re
     // Set headers for CSV download
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=summary.csv');
-    res.send(csv);
+    res.send('\\uFEFF' + csv);
   } catch (err) {
     console.error('Error exporting users:', err);
     res.status(500).send('Server error');
@@ -466,6 +565,15 @@ app.post('/api/import-employees', ensureAuthenticated, ensureRole('admin'), uplo
         fs.unlink(req.file.path, () => {});
       }
     });
+});
+
+// ชื่อร้าน/ผู้ใช้แบบย่อ (ใช้สำหรับโชว์ในโมดัล)
+app.get('/api/user-basic', ensureAuthenticated, async (req, res) => {
+  const { id } = req.query;
+  if (!id) return res.status(400).send('missing id');
+  const u = await User.findById(id).select('username name role').lean();
+  if (!u) return res.status(404).send('not found');
+  res.json(u);
 });
 
 // Start the server

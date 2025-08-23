@@ -1,97 +1,193 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>กระเป๋าผู้ใช้ | กระเป๋าเครดิต</title>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    /* Modal สรุปผลการชำระ (เฉพาะหน้านี้) */
+    .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:center;justify-content:center;z-index:50}
+    .modal{background:#fff;border:1px solid var(--border-color);border-radius:12px;box-shadow:0 10px 25px rgba(0,0,0,.15);width:100%;max-width:420px;padding:1.25rem}
+    .modal h4{margin:0 0 .75rem 0;color:var(--primary-color)}
+    .modal .row{display:flex;justify-content:space-between;margin:.25rem 0;color:var(--text-primary)}
+    .modal .row span:first-child{color:var(--text-secondary)}
+    .modal .actions{margin-top:1rem;text-align:right}
+  </style>
 </head>
 <body>
   <div class="container admin-container">
-  <h2>🏦 ระบบกระเป๋าเครดิต</h2>
-   <div class="card">
+    <h2>🏦 ระบบกระเป๋าเครดิต</h2>
+    <div class="card">
       <h3>👤 หน้าผู้ใช้งาน</h3>
-    <div id="greeting">สวัสดี นายสมชาย ใจดี!</div>
-    <p id="balance">ยอดคงเหลือ: ...</p>
+      <div id="greeting">กำลังโหลด...</div>
+      <p id="balance">ยอดคงเหลือ: ... เครดิต</p>
 
-    <h3>สร้าง QR Code สำหรับโอนเครดิต</h3>
-    <label for="amount">จำนวนเครดิตที่ต้องการโอน</label>
-    <input type="number" id="amount" min="1" placeholder="จำนวนเครดิต">
-    <button id="generateBtn">สร้าง QR Code</button>
-    <div id="qrContainer" style="margin-top:1rem;"></div>
+      <h3>สแกน QR ร้านค้าเพื่อชำระ</h3>
+      <button id="scanBtn">📷 สแกน QR ร้านค้า</button>
+      <div id="qr-reader" style="width: 300px; display: none; margin-top: 1rem;"></div>
 
-    <button id="logoutBtn">ออกจากระบบ</button>
+      <div id="payBox" style="display:none; margin-top:1rem;" class="card">
+        <div id="merchantInfo" class="message"></div>
+        <label for="payAmount">จำนวนเครดิตที่ต้องการจ่าย</label>
+        <input type="number" id="payAmount" min="1" step="1" inputmode="numeric" pattern="\d*" placeholder="จำนวนเต็ม ≥ 1" />
+        <button id="payBtn" class="btn-success">ยืนยันชำระ</button>
+      </div>
 
+      <button id="logoutBtn" class="btn-danger">ออกจากระบบ</button>
+    </div>
   </div>
 
+  <!-- Modal แสดงสรุปการชำระ -->
+  <div id="paymentOverlay" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="paymentTitle">
+    <div class="modal">
+      <h4 id="paymentTitle">✅ ชำระเครดิตสำเร็จ</h4>
+      <div class="row"><span>ร้านค้า</span><strong id="mName">-</strong></div>
+      <div class="row"><span>ยอดชำระ</span><strong id="mAmount">-</strong></div>
+      <div class="row"><span>เวลา</span><strong id="mTime">-</strong></div>
+      <div class="row"><span>เครดิตคงเหลือของคุณ</span><strong id="mRemain">-</strong></div>
+      <div class="actions">
+        <button id="closeModal" class="btn-secondary">ปิด</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- html5-qrcode สำหรับสแกน QR ด้วยกล้องบนเบราว์เซอร์ -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
   <script>
-    // Fetch the logged-in user info and update the page
-    let currentUser = null;
+    // ดึงข้อมูลผู้ใช้ปัจจุบัน
+    window.currentUser = null;
     fetch('/api/me')
-      .then(response => {
-        if (!response.ok) {
-          // If the user is not authenticated, redirect to login
-          window.location.href = '/login.html';
-        }
-        return response.json();
-      })
+      .then(res => { if (!res.ok) { window.location.href = '/login.html'; } return res.json(); })
       .then(user => {
-        currentUser = user;
-        // Show the user's full name if available, otherwise fall back
-        // to the username. Employee accounts imported from CSV will
-        // have a name field that we prefer to display.
+        window.currentUser = user;
         const displayName = user.name || user.username;
         document.getElementById('greeting').textContent = `สวัสดี ${displayName}!`;
         document.getElementById('balance').textContent = `ยอดคงเหลือ: ${user.credit} เครดิต`;
       })
-      .catch(err => {
-        console.error(err);
-      });
+      .catch(() => { window.location.href = '/login.html'; });
 
-    // Generate QR Code when user clicks the button
-    document.getElementById('generateBtn').addEventListener('click', () => {
-      const amount = document.getElementById('amount').value;
-      if (!amount || parseFloat(amount) <= 0) {
-        alert('กรุณากรอกจำนวนเครดิตที่ถูกต้อง');
-        return;
+    // Helper: เรียกดูชื่อร้านจาก id (fallback เป็น id ถ้าไม่สำเร็จ)
+    async function lookupUserBasic(id){
+      try{
+        const res = await fetch(`/api/user-basic?id=${encodeURIComponent(id)}`);
+        if(!res.ok) throw 0;
+        const data = await res.json();
+        return data.name || data.username || id;
+      }catch{ return id; }
+    }
+
+    // Modal helpers
+    const overlay = document.getElementById('paymentOverlay');
+    const closeModalBtn = document.getElementById('closeModal');
+    function openPaymentModal({merchantName, amount, timeText, remain}){
+      document.getElementById('mName').textContent = merchantName;
+      document.getElementById('mAmount').textContent = `${amount} เครดิต`;
+      document.getElementById('mTime').textContent = timeText;
+      document.getElementById('mRemain').textContent = `${remain} เครดิต`;
+      overlay.style.display = 'flex';
+      closeModalBtn.focus();
+    }
+    function closePaymentModal(){ overlay.style.display = 'none'; }
+    closeModalBtn.addEventListener('click', closePaymentModal);
+    overlay.addEventListener('click', (e)=>{ if(e.target === overlay) closePaymentModal(); });
+
+    // สแกน QR ร้านค้า
+    let qrScanner = null;
+    let lastPayload = null;
+    let lastMerchantId = null;
+    let lastMerchantName = null;
+
+    document.getElementById('scanBtn').addEventListener('click', async () => {
+      if (!qrScanner) qrScanner = new Html5Qrcode('qr-reader');
+      const qrReader = document.getElementById('qr-reader');
+      const payBox = document.getElementById('payBox');
+      const infoBox = document.getElementById('merchantInfo');
+
+      payBox.style.display = 'none';
+      infoBox.textContent = '';
+      qrReader.style.display = 'block';
+
+      const onScanSuccess = async (decodedText) => {
+        try { await qrScanner.stop(); } catch (e) {}
+        qrReader.style.display = 'none';
+
+        // เก็บ payload และตรวจประเภท
+        let data;
+        try { data = JSON.parse(decodedText); } catch { alert('QR ไม่ถูกต้อง'); return; }
+        if (data?.type !== 'merchant-receive' || !data?.to) {
+          alert('QR นี้ไม่ใช่ของร้านค้าสำหรับรับเครดิต');
+          return;
+        }
+        lastPayload = decodedText;
+        lastMerchantId = data.to;
+        lastMerchantName = await lookupUserBasic(lastMerchantId);
+
+        infoBox.className = 'message success';
+        infoBox.textContent = `จะชำระให้ร้าน: ${lastMerchantName}`;
+        document.getElementById('payBox').style.display = 'block';
+      };
+      const onScanFailure = () => { /* ignore – สแกนต่อเนื่อง */ };
+
+      try {
+        await qrScanner.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          onScanSuccess,
+          onScanFailure
+        );
+      } catch (err) {
+        alert('ไม่สามารถเปิดกล้องได้: ' + err);
       }
-      // Prevent generating QR if amount exceeds current credit
-      const num = parseFloat(amount);
-      if (currentUser && num > currentUser.credit) {
-        alert('จำนวนเครดิตที่กรอกเกินยอดคงเหลือของคุณ');
-        return;
-      }
-      fetch('/api/generate-qr', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ amount })
-      })
-        .then(res => {
-          if (!res.ok) {
-            return res.text().then(text => { throw new Error(text); });
-          }
-          return res.json();
-        })
-        .then(data => {
-          const container = document.getElementById('qrContainer');
-          container.innerHTML = '';
-          const img = document.createElement('img');
-          img.src = data.qrDataUri;
-          img.alt = 'QR Code';
-          img.style.maxWidth = '200px';
-          container.appendChild(img);
-        })
-        .catch(err => alert(`เกิดข้อผิดพลาด: ${err.message}`));
     });
 
-    // Attach logout event
-    document.getElementById('logoutBtn').addEventListener('click', () => {
-      fetch('/logout')
-        .then(() => {
-          window.location.href = '/login.html';
+    // ยืนยันชำระ
+    document.getElementById('payBtn').addEventListener('click', async () => {
+      const raw = document.getElementById('payAmount').value;
+      const amount = Math.trunc(Number(raw));
+      if (!Number.isFinite(amount) || amount <= 0) {
+        alert('กรุณากรอกจำนวนเครดิตที่ถูกต้อง (จำนวนเต็ม > 0)');
+        return;
+      }
+      if (window.currentUser && amount > window.currentUser.credit) {
+        alert('เครดิตของคุณไม่พอ');
+        return;
+      }
+      if (!lastPayload) { alert('ยังไม่ได้สแกน QR ร้านค้า'); return; }
+      try {
+        const res = await fetch('/api/pay-qr', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payload: lastPayload, amount })
         });
+        const data = await (res.headers.get('content-type')?.includes('application/json') ? res.json() : res.text());
+        if (!res.ok) throw new Error(typeof data === 'string' ? data : (data.message || 'ชำระไม่สำเร็จ'));
+
+        // อัปเดตยอดคงเหลือจากเซิร์ฟเวอร์
+        const me = await fetch('/api/me').then(r => r.json());
+        window.currentUser = me;
+        document.getElementById('balance').textContent = `ยอดคงเหลือ: ${me.credit} เครดิต`;
+
+        // แสดง Modal สรุปผล (ชื่อร้าน, ยอดชำระ, เวลา, เครดิตคงเหลือ)
+        const timeText = new Date().toLocaleString('th-TH');
+        openPaymentModal({
+          merchantName: lastMerchantName || lastMerchantId,
+          amount,
+          timeText,
+          remain: me.credit
+        });
+
+        // รีเซ็ตฟอร์มการจ่าย
+        document.getElementById('payAmount').value = '';
+        document.getElementById('payBox').style.display = 'none';
+      } catch (err) {
+        alert(err.message || 'เกิดข้อผิดพลาด');
+      }
+    });
+
+    // ออกจากระบบ
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+      fetch('/logout').then(() => { window.location.href = '/login.html'; });
     });
   </script>
 </body>

@@ -11,6 +11,20 @@ const mongoose = require('mongoose');
  * provided for completeness and to simplify queries. Using Mongoose
  * ensures that the collection enforces the structure defined here.
  */
+
+/**
+ * สคีมาผู้ใช้ (User schema) สำหรับแอปกระเป๋าเครดิต
+ *
+ * ผู้ใช้แต่ละคนจะมี username ที่ไม่ซ้ำกันและ password (แบบ hash)  
+ * ฟิลด์ role ใช้กำหนดสิทธิ์การเข้าถึงในระบบ โดยมีค่าได้ 3 แบบคือ  
+ * "user", "merchant" หรือ "admin"  
+ * 
+ * - user และ merchant จะมีเครดิตสะสมอยู่ในเอกสารผู้ใช้โดยตรง  
+ * - admin โดยทั่วไปจะไม่ใช้เครดิตส่วนตัว แต่มีฟิลด์ credit ไว้เพื่อความสมบูรณ์และให้ query ได้ง่าย  
+ * 
+ * การใช้ Mongoose จะช่วยบังคับโครงสร้างของ collection ให้เป็นไปตามที่กำหนดไว้
+ */
+
 const userSchema = new mongoose.Schema({
   // The unique identifier that users will log in with. In this
   // application the employee code doubles as the username for
@@ -51,7 +65,12 @@ const userSchema = new mongoose.Schema({
   },
   credit: {
     type: Number,
-    default: 0
+    default: 50,
+    min: 0,
+    validate: {
+    validator: Number.isInteger,
+    message: 'credit ต้องเป็นจำนวนเต็ม'
+  }
   }
 });
 
