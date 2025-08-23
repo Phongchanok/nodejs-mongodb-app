@@ -100,6 +100,35 @@ function ensureRole(role) {
   };
 }
 
+// base64url helpers
+function b64urlEncode(buf) {
+  return Buffer.from(buf).toString('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/,'');
+}
+function b64urlFromJSON(obj) {
+  return b64urlEncode(JSON.stringify(obj));
+}
+function b64urlDecodeToJSON(b64) {
+  const padded = b64.replace(/-/g, '+').replace(/_/g, '/')
+    + '==='.slice((b64.length + 3) % 4); // padding
+  const json = Buffer.from(padded, 'base64').toString('utf8');
+  return JSON.parse(json);
+}
+const QR_SECRET = process.env.QR_SECRET || 'dev-very-secret-change-me';
+function hmacSign(rawBase64Url) {
+  const mac = crypto.createHmac('sha256', QR_SECRET)
+    .update(rawBase64Url)
+    .digest();
+  return b64urlEncode(mac);
+}
+function verifyHmac(rawBase64Url, sig) {
+  const expected = hmacSign(rawBase64Url);
+  // timing‑safe compare
+  const a = Buffer.from(expected);
+  const b = Buffer.from(sig);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 /**
  * Serve static files from the "public" directory. This allows us to
  * deliver the HTML, CSS and client-side JavaScript files without any
@@ -275,70 +304,117 @@ app.get('/api/users', ensureAuthenticated, ensureRole('admin'), async (req, res)
   }
 });*/
 
-/// GET /api/merchant-qr  (merchant เท่านั้น)
-// คืนรูป QR (dataUrl) ที่เข้ารหัส JSON: {"type":"merchant-receive","to":"<merchantId>"}
-app.get('/api/merchant-qr', ensureAuthenticated, ensureRole('merchant'), async (req, res) => {
+// ===== [แทนที่/ปรับปรุง handler GET /api/merchant-qr] =====
+app.get('/api/merchant-qr', requireRole('merchant'), async (req, res) => {
   try {
-    const me = await User.findById(req.session.userId).select('_id').lean();
-    const payload = JSON.stringify({ type: 'merchant-receive', to: String(me._id) });
-    const dataUrl = await QRCode.toDataURL(payload);
-    res.json({ ok: true, dataUrl });
+    // payload ถาวร (ไม่มี exp) ใช้สำหรับพิมพ์ติดร้าน
+    const payload = {
+      type: 'merchant-receive',
+      to: req.session.userId,     // id ของร้านจาก session
+      v: 1                        // ใส่ version ไว้อนาคต
+    };
+
+    const raw = b64urlFromJSON(payload); // เข้ารหัส payload เป็น base64url
+    const sig = hmacSign(raw);           // ลายเซ็น
+
+    const qrText = JSON.stringify({ raw, sig });  // สิ่งที่จะถูกฝังใน QR
+    // สร้างรูป QR (ใช้ไลบรารี qrcode ตามที่คุณใช้อยู่)
+    const qrcode = require('qrcode');
+    const dataUrl = await qrcode.toDataURL(qrText);
+
+    res.json({ dataUrl });  // frontend จะโชว์ภาพ และสามารถสั่งพิมพ์ได้
   } catch (e) {
-    res.status(500).json({ ok: false, message: 'สร้าง QR ร้านค้าไม่สำเร็จ' });
+    res.status(500).send('สร้าง QR ไม่สำเร็จ');
   }
 });
 
 
-// POST /api/pay-qr
-// body: { payload: string(JSON), amount: number }
-// เฉพาะผู้ใช้ role=user เท่านั้น
-app.post('/api/pay-qr', ensureAuthenticated, ensureRole('user'), async (req, res) => {
+
+// ===== [แทนที่/ปรับปรุง handler POST /api/pay-qr] =====
+app.post('/api/pay-qr', requireRole('user'), async (req, res) => {
   try {
     const { payload, amount } = req.body;
-    const amt = Number(amount);
-    if (!payload || !Number.isFinite(amt) || amt <= 0) {
-      return res.status(400).json({ ok: false, message: 'ข้อมูลไม่ถูกต้อง' });
+    const amt = Math.trunc(Number(amount));
+    if (!Number.isFinite(amt) || amt <= 0) {
+      return res.status(400).send('จำนวนเครดิตไม่ถูกต้อง');
     }
 
-    // QR ที่คาดหวัง: {"type":"merchant-receive","to":"<merchantId>"}
-    let data;
-    try { data = JSON.parse(payload); } catch {
-      return res.status(400).json({ ok: false, message: 'QR ไม่ถูกต้อง' });
+    // 1) แยกกรณี payload
+    let merchantId = null;
+
+    // กรณีใหม่: QR เป็น {"raw":"...","sig":"..."}
+    try {
+      const obj = JSON.parse(payload);
+      if (obj && obj.raw && obj.sig) {
+        // ตรวจลายเซ็น
+        if (!verifyHmac(obj.raw, obj.sig)) {
+          return res.status(400).send('QR ไม่ถูกต้อง (ลายเซ็นไม่ผ่าน)');
+        }
+        const data = b64urlDecodeToJSON(obj.raw);
+        if (data?.type !== 'merchant-receive' || !data?.to) {
+          return res.status(400).send('QR ไม่ถูกต้อง (ชนิด/ปลายทาง)');
+        }
+        merchantId = data.to;
+      }
+    } catch (_) { /* เงียบ: อาจเป็นรูปแบบเก่า */ }
+
+    // กรณีเก่า (backward compatible): payload เป็น JSON ของ {type,to}
+    if (!merchantId) {
+      let legacy;
+      try { legacy = JSON.parse(payload); } catch { /* noop */ }
+      if (legacy?.type === 'merchant-receive' && legacy?.to) {
+        merchantId = legacy.to;
+        // *** แนะนำ: ในอนาคตปิดโหมด legacy แล้วบังคับใช้ HMAC เท่านั้น ***
+      }
     }
-    if (data?.type !== 'merchant-receive' || !data?.to) {
-      return res.status(400).json({ ok: false, message: 'QR นี้ไม่ใช่ของร้านค้า' });
+
+    if (!merchantId) {
+      return res.status(400).send('ไม่พบปลายทางร้านค้าจาก QR');
     }
 
-    const [sender, merchant] = await Promise.all([
-      User.findById(req.session.userId),
-      User.findOne({ _id: data.to, role: 'merchant' })
-    ]);
-
-    if (!sender)   return res.status(401).json({ ok: false, message: 'ไม่ได้เข้าสู่ระบบ' });
-    if (!merchant) return res.status(404).json({ ok: false, message: 'ไม่พบบัญชีร้านค้า' });
-
-    if (sender.credit < amt) {
-      return res.status(400).json({ ok: false, message: 'เครดิตของคุณไม่พอ' });
+    // 2) ตรวจว่าปลายทางเป็น merchant จริง
+    const merchant = await User.findOne({ _id: merchantId, role: 'merchant' }).lean();
+    if (!merchant) {
+      return res.status(400).send('ไม่พบร้านค้า');
     }
 
-    // ตัด/เพิ่มเครดิต
-    sender.credit  -= amt;
-    merchant.credit += amt;
+    // 3) ทำธุรกรรมแบบอะตอมมิก
+    const sessionDb = await mongoose.startSession();
+    sessionDb.startTransaction();
+    try {
+      const payer = await User.findOneAndUpdate(
+        { _id: req.session.userId, credit: { $gte: amt } },
+        { $inc: { credit: -amt } },
+        { new: true, session: sessionDb }
+      );
+      if (!payer) throw new Error('เครดิตของคุณไม่พอ');
 
-    // บันทึกธุรกรรม (กันซ้ำ/มีร่องรอย)
-    const tx = new Transaction({
-      token: `pay-${Date.now()}-${sender._id}-${merchant._id}-${amt}`,
-      from: sender._id,
-      to: merchant._id,
-      amount: amt,
-      used: true
-    });
+      const receiver = await User.findOneAndUpdate(
+        { _id: merchantId, role: 'merchant' },
+        { $inc: { credit: amt } },
+        { new: true, session: sessionDb }
+      );
+      if (!receiver) throw new Error('ไม่พบปลายทางร้านค้า');
 
-    await Promise.all([ sender.save(), merchant.save(), tx.save() ]);
-    res.json({ ok: true, message: 'ชำระเงินสำเร็จ' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, message: 'Server error ขณะชำระเงิน' });
+      await Transaction.create([{
+        from: payer._id,
+        to: receiver._id,
+        type: 'pay',
+        amount: amt,
+        createdAt: new Date()
+      }], { session: sessionDb });
+
+      await sessionDb.commitTransaction();
+      sessionDb.endSession();
+
+      return res.json({ ok: true, message: 'ชำระสำเร็จ' });
+    } catch (err) {
+      await sessionDb.abortTransaction().catch(()=>{});
+      sessionDb.endSession();
+      return res.status(400).send(err.message || 'ชำระไม่สำเร็จ');
+    }
+  } catch (e) {
+    return res.status(500).send('เกิดข้อผิดพลาด');
   }
 });
 

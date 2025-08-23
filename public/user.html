@@ -92,6 +92,14 @@
     closeModalBtn.addEventListener('click', closePaymentModal);
     overlay.addEventListener('click', (e)=>{ if(e.target === overlay) closePaymentModal(); });
 
+    // ---- Utilities สำหรับ base64url -> JSON (ใช้บนเบราว์เซอร์) ----
+    function base64UrlToJson(b64url) {
+      const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/')
+        + '==='.slice((b64url.length + 3) % 4); // เติม padding ให้ครบ
+      const text = atob(b64);
+      return JSON.parse(text);
+    }
+
     // สแกน QR ร้านค้า
     let qrScanner = null;
     let lastPayload = null;
@@ -112,22 +120,43 @@
         try { await qrScanner.stop(); } catch (e) {}
         qrReader.style.display = 'none';
 
-        // เก็บ payload และตรวจประเภท
-        let data;
-        try { data = JSON.parse(decodedText); } catch { alert('QR ไม่ถูกต้อง'); return; }
-        if (data?.type !== 'merchant-receive' || !data?.to) {
+        // รองรับ 2 รูปแบบ: (ใหม่){raw,sig} ที่เซ็น HMAC แล้ว และ (เดิม){type,to}
+        let parsed;
+        try { parsed = JSON.parse(decodedText); }
+        catch { alert('QR ไม่ถูกต้อง'); return; }
+
+        let merchantId;
+        if (parsed && parsed.raw && parsed.sig) {
+          // แบบใหม่: decode raw เพื่ออ่าน payload จริง
+          try {
+            const data = base64UrlToJson(parsed.raw);
+            if (data?.type !== 'merchant-receive' || !data?.to) {
+              alert('QR ไม่ถูกต้อง'); return;
+            }
+            merchantId = data.to;
+            // เก็บ payload แบบใหม่ (ให้ backend ตรวจลายเซ็น)
+            lastPayload = JSON.stringify({ raw: parsed.raw, sig: parsed.sig });
+          } catch {
+            alert('QR ไม่ถูกต้อง'); return;
+          }
+        } else if (parsed?.type === 'merchant-receive' && parsed?.to) {
+          // แบบเดิม (ยังรองรับเพื่อความเข้ากันได้)
+          merchantId = parsed.to;
+          lastPayload = decodedText;
+        } else {
           alert('QR นี้ไม่ใช่ของร้านค้าสำหรับรับเครดิต');
           return;
         }
-        lastPayload = decodedText;
-        lastMerchantId = data.to;
-        lastMerchantName = await lookupUserBasic(lastMerchantId);
+
+        lastMerchantId = merchantId;
+        lastMerchantName = await lookupUserBasic(merchantId);
 
         infoBox.className = 'message success';
         infoBox.textContent = `จะชำระให้ร้าน: ${lastMerchantName}`;
         document.getElementById('payBox').style.display = 'block';
       };
-      const onScanFailure = () => { /* ignore – สแกนต่อเนื่อง */ };
+
+      const onScanFailure = () => { /* ละไว้ – ไลบรารีจะสแกนต่อเนื่องเอง */ };
 
       try {
         await qrScanner.start(
