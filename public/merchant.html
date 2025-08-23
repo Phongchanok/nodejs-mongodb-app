@@ -67,22 +67,30 @@
     });
 
     // เพิ่มปุ่มสร้าง QR:
-  document.getElementById('genQrBtn').addEventListener('click', async () => {
-    try {
-      const res = await fetch('/api/merchant-qr', { method: 'POST' });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      const img = document.createElement('img');
-      img.src = data.qrDataUri;
-      img.alt = 'Merchant QR';
-      img.style.maxWidth = '220px';
-      const box = document.getElementById('qrContainer');
-      box.innerHTML = '';
-      box.appendChild(img);
-    } catch (err) {
-      alert('สร้าง QR ไม่สำเร็จ: ' + err.message);
-    }
-  });
+
+document.getElementById('genQrBtn').addEventListener('click', async () => {
+  try {
+    const res = await fetch('/api/merchant-qr', {
+      method: 'GET',
+      credentials: 'same-origin'
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+
+    const img = document.createElement('img');
+    img.src = data.dataUrl;          // <-- เปลี่ยนจาก qrDataUri เป็น dataUrl
+    img.alt = 'Merchant QR';
+    img.style.maxWidth = '220px';
+
+    const box = document.getElementById('qrContainer');
+    box.innerHTML = '';
+    box.appendChild(img);
+  } catch (err) {
+    alert('สร้าง QR ไม่สำเร็จ: ' + (err.message || 'ไม่ทราบสาเหตุ'));
+  }
+});
+
+
     
     /**
     // QR code scanning functionality

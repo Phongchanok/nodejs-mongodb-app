@@ -275,80 +275,73 @@ app.get('/api/users', ensureAuthenticated, ensureRole('admin'), async (req, res)
   }
 });*/
 
-// POST /api/merchant-qr  (merchant-only)
-// ตอบกลับเป็น data URI สำหรับ <img src="..."> ได้เลย
-app.post('/api/merchant-qr', ensureAuthenticated, ensureRole('merchant'), async (req, res) => {
+/// GET /api/merchant-qr  (merchant เท่านั้น)
+// คืนรูป QR (dataUrl) ที่เข้ารหัส JSON: {"type":"merchant-receive","to":"<merchantId>"}
+app.get('/api/merchant-qr', ensureAuthenticated, ensureRole('merchant'), async (req, res) => {
   try {
-    const payload = {
-      type: 'merchant-receive',
-      to: req.session.userId, // ร้านค้าปัจจุบัน
-      v: 1,                    // เวอร์ชัน payload เผื่อเปลี่ยนสคีมาในอนาคต
-      ts: Date.now()
-    };
-    const qrDataUri = await QRCode.toDataURL(JSON.stringify(payload));
-    res.json({ qrDataUri });
-  } catch (err) {
-    console.error('Error generating merchant QR:', err);
-    res.status(500).send('Error generating merchant QR');
+    const me = await User.findById(req.session.userId).select('_id').lean();
+    const payload = JSON.stringify({ type: 'merchant-receive', to: String(me._id) });
+    const dataUrl = await QRCode.toDataURL(payload);
+    res.json({ ok: true, dataUrl });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: 'สร้าง QR ร้านค้าไม่สำเร็จ' });
   }
 });
 
-// POST /api/pay-qr  (user-only)
+
+// POST /api/pay-qr
+// body: { payload: string(JSON), amount: number }
+// เฉพาะผู้ใช้ role=user เท่านั้น
 app.post('/api/pay-qr', ensureAuthenticated, ensureRole('user'), async (req, res) => {
-  const { payload, amount } = req.body;
-  if (!payload) return res.status(400).send('Missing payload');
-
-  let data;
-  try { data = JSON.parse(payload); } catch { return res.status(400).send('Invalid payload'); }
-
-  if (data?.type !== 'merchant-receive' || !data?.to) {
-    return res.status(400).send('Invalid QR type or destination');
-  }
-
-  // amount ต้องเป็นจำนวนเต็มบวก
-  const value = Math.trunc(Number(amount));
-  if (!Number.isFinite(value) || value <= 0) {
-    return res.status(400).send('Invalid amount (ต้องเป็นจำนวนเต็มมากกว่า 0)');
-  }
-
-  // ป้องกันจ่ายให้ตัวเอง (ในกรณี user มี role merchant ด้วย – กันไว้เผื่อ)
-  if (String(data.to) === String(req.session.userId)) {
-    return res.status(400).send('ไม่สามารถจ่ายให้ตัวเองได้');
-  }
-
   try {
-    const payer = await User.findById(req.session.userId);
-    const merchant = await User.findById(data.to);
-    if (!payer || !merchant) return res.status(404).send('User or merchant not found');
-    if (merchant.role !== 'merchant') return res.status(400).send('ปลายทางไม่ใช่ร้านค้า');
+    const { payload, amount } = req.body;
+    const amt = Number(amount);
+    if (!payload || !Number.isFinite(amt) || amt <= 0) {
+      return res.status(400).json({ ok: false, message: 'ข้อมูลไม่ถูกต้อง' });
+    }
 
-    // เครดิตต้องพอ
-    if (payer.credit < value) return res.status(400).send('เครดิตไม่พอ');
+    // QR ที่คาดหวัง: {"type":"merchant-receive","to":"<merchantId>"}
+    let data;
+    try { data = JSON.parse(payload); } catch {
+      return res.status(400).json({ ok: false, message: 'QR ไม่ถูกต้อง' });
+    }
+    if (data?.type !== 'merchant-receive' || !data?.to) {
+      return res.status(400).json({ ok: false, message: 'QR นี้ไม่ใช่ของร้านค้า' });
+    }
 
-    // โอนแบบง่าย (ถ้าต้องกัน concurrent race: ใช้ transaction/atomic ops เพิ่มได้)
-    payer.credit -= value;
-    merchant.credit += value;
-    await payer.save();
-    await merchant.save();
+    const [sender, merchant] = await Promise.all([
+      User.findById(req.session.userId),
+      User.findOne({ _id: data.to, role: 'merchant' })
+    ]);
 
-    await Transaction.create({
-      from: payer._id,
+    if (!sender)   return res.status(401).json({ ok: false, message: 'ไม่ได้เข้าสู่ระบบ' });
+    if (!merchant) return res.status(404).json({ ok: false, message: 'ไม่พบบัญชีร้านค้า' });
+
+    if (sender.credit < amt) {
+      return res.status(400).json({ ok: false, message: 'เครดิตของคุณไม่พอ' });
+    }
+
+    // ตัด/เพิ่มเครดิต
+    sender.credit  -= amt;
+    merchant.credit += amt;
+
+    // บันทึกธุรกรรม (กันซ้ำ/มีร่องรอย)
+    const tx = new Transaction({
+      token: `pay-${Date.now()}-${sender._id}-${merchant._id}-${amt}`,
+      from: sender._id,
       to: merchant._id,
-      amount: value,
-      timestamp: new Date(),
+      amount: amt,
       used: true
     });
 
-    res.json({
-      message: 'ชำระสำเร็จ',
-      payerCredit: payer.credit,
-      merchantCredit: merchant.credit
-    });
+    await Promise.all([ sender.save(), merchant.save(), tx.save() ]);
+    res.json({ ok: true, message: 'ชำระเงินสำเร็จ' });
   } catch (err) {
-    console.error('Error paying via QR:', err);
-    res.status(500).send('Server error');
+    console.error(err);
+    res.status(500).json({ ok: false, message: 'Server error ขณะชำระเงิน' });
   }
 });
+
 
 
 /**
@@ -567,13 +560,75 @@ app.post('/api/import-employees', ensureAuthenticated, ensureRole('admin'), uplo
     });
 });
 
-// ชื่อร้าน/ผู้ใช้แบบย่อ (ใช้สำหรับโชว์ในโมดัล)
+// GET /api/user-basic?id=<ObjectId>
+// ใช้คืน name/username สำหรับโชว์บนหน้าผู้ใช้เวลาแสดงชื่อร้านที่สแกนได้
 app.get('/api/user-basic', ensureAuthenticated, async (req, res) => {
-  const { id } = req.query;
-  if (!id) return res.status(400).send('missing id');
-  const u = await User.findById(id).select('username name role').lean();
-  if (!u) return res.status(404).send('not found');
-  res.json(u);
+  try {
+    const { id } = req.query;
+    if (!id) return res.status(400).json({ ok: false, message: 'missing id' });
+    const u = await User.findById(id).select('name username').lean();
+    if (!u) return res.status(404).json({ ok: false, message: 'not found' });
+    res.json(u);
+  } catch (e) {
+    res.status(500).json({ ok: false, message: 'server error' });
+  }
+});
+
+app.get('/api/merchant-qr', ensureAuthenticated, ensureRole('merchant'), async (req, res) => {
+  const me = await User.findById(req.session.userId).select('_id').lean();
+  const payload = JSON.stringify({ merchantId: String(me._id) });
+  try {
+    const dataUrl = await QRCode.toDataURL(payload);
+    res.json({ ok: true, dataUrl });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: 'สร้าง QR ร้านค้าไม่สำเร็จ' });
+  }
+});
+
+app.post('/api/pay-merchant', ensureAuthenticated, ensureRole('user'), async (req, res) => {
+  try {
+    let { merchantId, amount } = req.body;
+    amount = Number(amount);
+    if (!merchantId || !Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ ok: false, message: 'ข้อมูลไม่ถูกต้อง' });
+    }
+
+    const [sender, merchant] = await Promise.all([
+      User.findById(req.session.userId),
+      User.findOne({ _id: merchantId, role: 'merchant' })
+    ]);
+    if (!merchant) return res.status(404).json({ ok: false, message: 'ไม่พบร้านค้า' });
+    if (!sender) return res.status(401).json({ ok: false, message: 'ไม่ได้เข้าสู่ระบบ' });
+
+    // ตรวจเครดิตเพียงพอ
+    if (sender.credit < amount) {
+      return res.status(400).json({ ok: false, message: 'เครดิตไม่เพียงพอ' });
+    }
+
+    // โอน
+    sender.credit -= amount;
+    merchant.credit += amount;
+
+    // บันทึกธุรกรรม (กันซ้ำ/เก็บประวัติ)
+    const tx = new Transaction({
+      token: `pay-${Date.now()}-${sender._id}-${merchant._id}-${amount}`,
+      from: sender._id,
+      to: merchant._id,
+      amount,
+      used: true // ธุรกรรมชำระเงินสำเร็จทันที
+    });
+
+    await Promise.all([sender.save(), merchant.save(), tx.save()]);
+    res.json({
+      ok: true,
+      message: 'ชำระเงินสำเร็จ',
+      senderCredit: sender.credit,
+      merchantCredit: merchant.credit
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, message: 'Server error ขณะชำระเงิน' });
+  }
 });
 
 // Start the server
