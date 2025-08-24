@@ -31,7 +31,7 @@
     }
 
     body {
-      font-family: 'Kanit', sans-serif;
+      font-family: 'Kanit', sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
       background: var(--background-gradient);
       color: var(--text-primary);
       min-height: 100vh;

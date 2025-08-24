@@ -10,7 +10,7 @@
     <div class="container">
     <h2>🏦 ระบบกระเป๋าเครดิต</h2>
       <div class="card">
-        <h3>👤 หน้าร้่านค้า</h3>
+        <h3>👤 หน้าร้านค้า</h3>
         <div id="greeting">กำลังโหลด...</div>
         <div id="balance">ยอดคงเหลือ: ... เครดิต</div>
         <h3>QR สำหรับรับเครดิต</h3>
@@ -53,7 +53,7 @@
         location.href = `/${user.role}.html`;
         return;
       }
-      document.getElementById('greeting').textContent = `ร้านค้่า: ${user.username} `;
+      document.getElementById('greeting').textContent = `ร้านค้า: ${user.username} `;
       document.getElementById('balance').textContent  = `ยอดเครดิต: ${user.credit} เครดิต`;
     });
 
