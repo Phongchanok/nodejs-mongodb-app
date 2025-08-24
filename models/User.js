@@ -65,7 +65,10 @@ const userSchema = new mongoose.Schema({
   },
   credit: {
     type: Number,
-    default: 50,
+    default: function () {
+    // ถ้าเป็นร้านค้า เริ่มที่ 0, อื่น ๆ (user/admin) เริ่มที่ 50
+    return this.role === 'merchant' ? 0 : 50;
+  },
     min: 0,
     validate: {
     validator: Number.isInteger,
