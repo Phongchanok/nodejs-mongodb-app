@@ -13,6 +13,8 @@
     .modal .row{display:flex;justify-content:space-between;margin:.25rem 0;color:var(--text-primary)}
     .modal .row span:first-child{color:var(--text-secondary)}
     .modal .actions{margin-top:1rem;text-align:right}
+    #promoBox { display:flex; gap:.5rem; align-items:center; }
+    #promoBox .promo-icon { font-size:1.25rem; line-height:1; }
   </style>
 </head>
 <body>
@@ -46,6 +48,8 @@
       <div class="row"><span>ยอดชำระ</span><strong id="mAmount">-</strong></div>
       <div class="row"><span>เวลา</span><strong id="mTime">-</strong></div>
       <div class="row"><span>เครดิตคงเหลือของคุณ</span><strong id="mRemain">-</strong></div>
+      <!-- ข้อความพิเศษหลังชำระ -->
+      <div id="promoBox" class="message success" style="display:none; margin-top:.75rem;" aria-live="polite"></div>
       <div class="actions">
         <button id="closeModal" class="btn-secondary">ปิด</button>
       </div>
@@ -55,6 +59,10 @@
   <!-- html5-qrcode สำหรับสแกน QR ด้วยกล้องบนเบราว์เซอร์ -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
   <script>
+    // ====== กำหนดข้อความโปรโมชัน/ประกาศพิเศษ ======
+    const PROMO_MESSAGE = 'ของขวัญจากบริษัท ครบรอบ 19 ปี';
+    const PROMO_ICON = '🎁';
+
     // ดึงข้อมูลผู้ใช้ปัจจุบัน
     window.currentUser = null;
     fetch('/api/me')
@@ -62,7 +70,7 @@
       .then(user => {
         window.currentUser = user;
         const displayName = user.name || user.username;
-        document.getElementById('greeting').textContent = `สวัสดี ${displayName}!`;
+        document.getElementById('greeting').textContent = `รหัสผู้ใช้งาน: ${displayName} `;
         document.getElementById('balance').textContent = `ยอดคงเหลือ: ${user.credit} เครดิต`;
       })
       .catch(() => { window.location.href = '/login.html'; });
@@ -80,11 +88,25 @@
     // Modal helpers
     const overlay = document.getElementById('paymentOverlay');
     const closeModalBtn = document.getElementById('closeModal');
-    function openPaymentModal({merchantName, amount, timeText, remain}){
+    const promoBox = document.getElementById('promoBox'); // ← เพิ่มบรรทัดนี้
+
+    // เพิ่มพารามิเตอร์ note เข้ามา และใช้แสดงไอคอน+ข้อความ
+    function openPaymentModal({merchantName, amount, timeText, remain, note}){
       document.getElementById('mName').textContent = merchantName;
       document.getElementById('mAmount').textContent = `${amount} เครดิต`;
       document.getElementById('mTime').textContent = timeText;
       document.getElementById('mRemain').textContent = `${remain} เครดิต`;
+
+      if (note && String(note).trim()) {
+        promoBox.innerHTML = `
+          <span class="promo-icon" aria-hidden="true">${PROMO_ICON}</span>
+          <span class="promo-text">${note}</span>
+        `;
+        promoBox.style.display = 'flex';   // ให้ตรงกับ CSS ที่ตั้งไว้
+      } else {
+        promoBox.style.display = 'none';
+      }
+
       overlay.style.display = 'flex';
       closeModalBtn.focus();
     }
@@ -120,27 +142,24 @@
         try { await qrScanner.stop(); } catch (e) {}
         qrReader.style.display = 'none';
 
-        // รองรับ 2 รูปแบบ: (ใหม่){raw,sig} ที่เซ็น HMAC แล้ว และ (เดิม){type,to}
+        // รองรับ 2 รูปแบบ: (ใหม่){raw,sig} และ (เดิม){type,to}
         let parsed;
         try { parsed = JSON.parse(decodedText); }
         catch { alert('QR ไม่ถูกต้อง'); return; }
 
         let merchantId;
         if (parsed && parsed.raw && parsed.sig) {
-          // แบบใหม่: decode raw เพื่ออ่าน payload จริง
           try {
             const data = base64UrlToJson(parsed.raw);
             if (data?.type !== 'merchant-receive' || !data?.to) {
               alert('QR ไม่ถูกต้อง'); return;
             }
             merchantId = data.to;
-            // เก็บ payload แบบใหม่ (ให้ backend ตรวจลายเซ็น)
             lastPayload = JSON.stringify({ raw: parsed.raw, sig: parsed.sig });
           } catch {
             alert('QR ไม่ถูกต้อง'); return;
           }
         } else if (parsed?.type === 'merchant-receive' && parsed?.to) {
-          // แบบเดิม (ยังรองรับเพื่อความเข้ากันได้)
           merchantId = parsed.to;
           lastPayload = decodedText;
         } else {
@@ -197,13 +216,14 @@
         window.currentUser = me;
         document.getElementById('balance').textContent = `ยอดคงเหลือ: ${me.credit} เครดิต`;
 
-        // แสดง Modal สรุปผล
+        // แสดง Modal สรุปผล + ข้อความพิเศษ (note)
         const timeText = new Date().toLocaleString('th-TH');
         openPaymentModal({
           merchantName: lastMerchantName || lastMerchantId,
           amount,
           timeText,
-          remain: me.credit
+          remain: me.credit,
+          note: PROMO_MESSAGE     // << ส่งข้อความมาที่นี่
         });
 
         // รีเซ็ตฟอร์มการจ่าย
