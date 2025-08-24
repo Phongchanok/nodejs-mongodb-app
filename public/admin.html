@@ -86,6 +86,21 @@
       el.style.display = 'block';
     }
 
+    // ==== FIX: helper ดาวน์โหลดไฟล์แบบไม่โดน popup blocker ====
+    async function downloadCSV(url, filename){
+      const res = await fetch(url, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      const href = URL.createObjectURL(blob);
+      a.href = href;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(href);
+    }
+
     // ตรวจ role ปัจจุบัน
     fetch('/api/me')
       .then(res => { if(!res.ok) location.href='/login.html'; return res.json(); })
@@ -188,8 +203,14 @@
       fetch('/logout').then(() => { location.href = '/login.html'; });
     });
 
-    // Export users CSV (รวมยอดผู้ใช้ทั้งหมด)
-    $('exportBtn').addEventListener('click', () => { window.open('/api/export-users', '_blank'); });
+    // Export users CSV (รวมยอดผู้ใช้ทั้งหมด) — ใช้ downloadCSV กัน popup
+    $('exportBtn').addEventListener('click', async () => {
+      try{
+        await downloadCSV('/api/export-users', 'users_summary.csv');
+      }catch(e){
+        alert('ดาวน์โหลดไม่สำเร็จ: ' + (e.message || e));
+      }
+    });
 
     // Import CSV (พนักงาน)
     $('importForm').addEventListener('submit', async function(e){
@@ -246,6 +267,8 @@
       const out = $('stlPreview');
       if(!merchantId || !date){ out.textContent = 'กรุณาเลือกร้านค้าและวันที่'; return; }
       out.textContent = 'กำลังปิดรอบ…';
+      const commitBtn = $('btnCommit');
+      commitBtn.disabled = true;
       try{
         const r = await fetch('/api/settlement/commit', {
           method:'POST',
@@ -256,12 +279,18 @@
         if(!r.ok) throw new Error(j.message || 'commit failed');
         out.textContent = JSON.stringify(j, null, 2);
         const sid = j.settlement_id;
-        // ดาวน์โหลดไฟล์ CSV สองชุด
-        window.open(`/api/settlement/${encodeURIComponent(sid)}/export-ledger.csv`, '_blank');
-        window.open(`/api/settlement/${encodeURIComponent(sid)}/export-summary.csv`, '_blank');
+
+        // ดาวน์โหลดไฟล์ CSV (สรุปก่อน แล้วตามด้วยบรรทัดธุรกรรม)
+        await downloadCSV(`/api/settlement/${encodeURIComponent(sid)}/export-summary.csv`, `${sid}_summary.csv`);
+        await downloadCSV(`/api/settlement/${encodeURIComponent(sid)}/export-ledger.csv`,  `${sid}_ledger.csv`);
+
         // รีโหลดเพื่ออัปเดตยอดเครดิตร้าน
         loadUsers();
-      }catch(e){ out.textContent = 'ผิดพลาด: ' + (e.message || e); }
+      }catch(e){
+        out.textContent = 'ผิดพลาด: ' + (e.message || e);
+      } finally {
+        commitBtn.disabled = false;
+      }
     });
   </script>
 </body>

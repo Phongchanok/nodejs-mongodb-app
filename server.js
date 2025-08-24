@@ -18,8 +18,13 @@ dotenv.config();
 // Config
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/wallet-app';
-const SESSION_SECRET = process.env.SESSION_SECRET || 'change_this_secret';
-const QR_SECRET = process.env.QR_SECRET || 'dev-very-secret-change-me';
+const SESSION_SECRET = process.env.SESSION_SECRET;
+const QR_SECRET = process.env.QR_SECRET;
+
+// บังคับให้ตั้งค่าใน production
+if (isProd && (!SESSION_SECRET || !QR_SECRET)) {
+  throw new Error('SESSION_SECRET และ QR_SECRET ต้องถูกตั้งในไฟล์ .env เมื่อรัน production');
+}
 
 // App init
 const app = express();
