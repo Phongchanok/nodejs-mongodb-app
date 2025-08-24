@@ -5,184 +5,263 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>แผงควบคุมแอดมิน | กระเป๋าเครดิต</title>
   <link rel="stylesheet" href="/style.css">
+  <style>
+    .hint{color:#6b7280;font-size:.9rem}
+    pre.code{background:#0b1020;color:#e5e7eb;padding:.75rem;border-radius:.5rem;overflow:auto;max-height:360px}
+    .row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+    .mt-1{margin-top:.5rem}.mt-2{margin-top:1rem}.mt-3{margin-top:1.5rem}
+    .message{padding:.5rem .75rem;border-radius:.5rem}
+    .message.success{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}
+    .message.error{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid #e5e7eb;padding:.5rem .6rem;text-align:left}
+    th{background:#f8fafc;font-weight:600}
+    a.copy{color:#2563eb;text-decoration:underline;cursor:pointer}
+  </style>
 </head>
 <body>
   <div class="card">
-      <h3>⚙️ แผงควบคุมแอดมิน</h3>
+    <h3>⚙️ แผงควบคุมแอดมิน</h3>
     <p id="welcome"></p>
+
     <h3>ผู้ใช้ทั้งหมด</h3>
-    <table id="users-table">
-        <thead>
-          <tr>
-            <th>ชื่อ</th>
-            <th>รหัสพนักงาน</th>
-            <th>บทบาท</th>
-            <th>เครดิต</th>
-            <th>ปรับเครดิต</th>
+    <div class="row mt-1">
+      <button id="refreshUsers">รีเฟรชรายชื่อ</button>
+      <button id="exportBtn" class="btn-secondary">📊 สรุปยอดผู้ใช้ (CSV)</button>
+    </div>
+    <p class="hint mt-1">คลิก <u>รหัสพนักงาน/username</u> ของร้านค้าเพื่อคัดลอก <code>merchantId</code> อัตโนมัติ</p>
+
+    <table id="users-table" class="mt-1">
+      <thead>
+        <tr>
+          <th>ชื่อ</th>
+          <th>รหัสพนักงาน/Username</th>
+          <th>บทบาท</th>
+          <th>เครดิต</th>
+          <th>ปรับเครดิต</th>
+          <th>ไอดี</th>
         </tr>
       </thead>
-      <tbody id="users-body">
-      </tbody>
+      <tbody id="users-body"></tbody>
     </table>
-    <!-- ปุ่มสำหรับแอดมินในการสรุปรายการผู้ใช้ทั้งหมดและดาวน์โหลดเป็นไฟล์ CSV -->
-    <button id="exportBtn" class="btn-secondary mt-2">📊สรุปยอด (CSV)</button>
 
-    <h3 style="margin-top:2rem;">📁นำเข้าข้อมูลพนักงานจากไฟล์ CSV</h3>
-    <form id="importForm" enctype="multipart/form-data" style="margin-bottom:1rem;">
+    <h3 class="mt-3">📁 นำเข้าข้อมูลพนักงานจากไฟล์ CSV</h3>
+    <form id="importForm" enctype="multipart/form-data" class="mt-1">
       <input type="file" name="file" accept=".csv" required />
       <button type="submit" class="btn-secondary">นำเข้า</button>
     </form>
 
-    <h3>🏪สร้างบัญชีร้านค้า</h3>
-    <label>ชื่อผู้ใช้ร้านค้า:</label>
-    <input type="text" id="merchantUsername" placeholder="username" />
-    <label>รหัสผ่าน:</label>
-    <input type="password" id="merchantPassword" placeholder="password" />
-    <button id="createMerchantBtn">สร้างร้านค้า</button>
+    <h3 class="mt-3">🏪 สร้างบัญชีร้านค้า</h3>
+    <div class="row mt-1">
+      <label>ชื่อผู้ใช้ร้านค้า:</label>
+      <input type="text" id="merchantUsername" placeholder="username" />
+      <label>รหัสผ่าน:</label>
+      <input type="password" id="merchantPassword" placeholder="password" />
+      <button id="createMerchantBtn" class="btn-success">สร้างร้านค้า</button>
+    </div>
+    <div id="merchantMsg" class="message mt-1" style="display:none"></div>
 
-    <button id="logoutBtn" style="display:block;margin-top:2rem;">ออกจากระบบ</button>
+    <!-- ปิดรอบ/สรุปยอดรายวัน (Lite) -->
+    <h3 class="mt-3">🧾 ปิดรอบ/สรุปยอดรายวัน (Lite)</h3>
+    <div class="row">
+      <label>เลือกร้านค้า:</label>
+      <select id="merchantSelect"></select>
+      <span class="hint">หรือระบุ merchantId เอง</span>
+      <input id="stlMerchant" placeholder="ObjectId ของร้านค้า" style="min-width:260px" />
+      <label>วันที่:</label>
+      <input id="stlDate" type="date" />
+      <button id="btnPreview">พรีวิว</button>
+      <button id="btnCommit" class="btn-success">ปิดรอบ & ดาวน์โหลด CSV</button>
+    </div>
+    <pre id="stlPreview" class="code mt-1">รอกด “พรีวิว” หรือ “ปิดรอบ” …</pre>
+
+    <button id="logoutBtn" class="btn-danger mt-3">ออกจากระบบ</button>
   </div>
 
   <script>
-    // Fetch current user info to ensure the correct role
+    const $ = id => document.getElementById(id);
+    function showMsg(el, text, type='success'){
+      el.textContent = text;
+      el.className = 'message ' + (type==='error'?'error':'success');
+      el.style.display = 'block';
+    }
+
+    // ตรวจ role ปัจจุบัน
     fetch('/api/me')
-      .then(res => {
-        if (!res.ok) {
-          window.location.href = '/login.html';
-        }
-        return res.json();
-      })
+      .then(res => { if(!res.ok) location.href='/login.html'; return res.json(); })
       .then(user => {
-        if (user.role !== 'admin') {
-          // Redirect if not admin
-          window.location.href = `/${user.role}.html`;
-          return;
-        }
-        document.getElementById('welcome').textContent = `สวัสดี ${user.username}!`;
+        if (user.role !== 'admin') { location.href = `/${user.role}.html`; return; }
+        $('welcome').textContent = `สวัสดี ${user.username}!`;
+        // ตั้งค่า default วันที่เป็นวันนี้ (โลคอล)
+        const today = new Date(); const yyyy=today.getFullYear();
+        const mm=String(today.getMonth()+1).padStart(2,'0');
+        const dd=String(today.getDate()).padStart(2,'0');
+        $('stlDate').value = `${yyyy}-${mm}-${dd}`;
         loadUsers();
       });
 
-    // Load all users into the table
-    function loadUsers() {
-      fetch('/api/users')
-        .then(res => res.json())
-        .then(users => {
-          const tbody = document.getElementById('users-body');
-          tbody.innerHTML = '';
-          users.forEach(u => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-              <td>${u.name || ''}</td>
-              <td>${u.username}</td>
-              <td>${u.role}</td>
-              <td>${u.credit}</td>
-              <td class="user-row">
-                <input type="number" value="${u.credit}" min="0" />
-                <button data-id="${u._id}">อัปเดต</button>
-              </td>
-            `;
-            tbody.appendChild(tr);
-          });
-          // Add event listeners after rendering
-          document.querySelectorAll('button[data-id]').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-              const userId = btn.getAttribute('data-id');
-              const input = btn.parentElement.querySelector('input');
-              const newCredit = parseFloat(input.value);
-              if (isNaN(newCredit)) {
-                alert('กรุณากรอกจำนวนเครดิตที่ถูกต้อง');
-                return;
+    // โหลดผู้ใช้ทั้งหมด + เติม select ร้านค้า
+    async function loadUsers(){
+      const tbody = $('users-body');
+      tbody.innerHTML = '<tr><td colspan="6">กำลังโหลด…</td></tr>';
+      try{
+        const users = await fetch('/api/users').then(r=>r.json());
+        tbody.innerHTML = '';
+        const merchants = [];
+        users.forEach(u => {
+          const tr = document.createElement('tr');
+          const isMerchant = u.role === 'merchant';
+          tr.innerHTML = `
+            <td>${u.name || ''}</td>
+            <td>${isMerchant ? `<a class="copy" data-copy="${u._id||u.id||''}">${u.username}</a>` : u.username}</td>
+            <td>${u.role}</td>
+            <td>${u.credit}</td>
+            <td class="user-row">
+              <input type="number" value="${u.credit}" min="0" />
+              <button data-id="${u._id}">อัปเดต</button>
+            </td>
+            <td>${u._id || u.id || ''}</td>
+          `;
+          tbody.appendChild(tr);
+
+          // คัดลอก merchantId เมื่อคลิกชื่อร้าน
+          const cp = tr.querySelector('a.copy');
+          if (cp) {
+            cp.addEventListener('click', () => {
+              const mid = cp.getAttribute('data-copy') || '';
+              if (mid) {
+                navigator.clipboard.writeText(mid).catch(()=>{});
+                $('stlMerchant').value = mid;
+                $('merchantSelect').value = mid;
               }
-              fetch(`/api/users/${userId}/credit`, {
-                method: 'PUT',
-                headers: {
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ credit: newCredit })
-              })
-                .then(res => {
-                  if (!res.ok) {
-                    return res.text().then(text => { throw new Error(text); });
-                  }
-                  return res.json();
-                })
-                .then(updated => {
-                  alert(`ปรับเครดิตของ ${updated.username} สำเร็จ`);
-                  loadUsers(); // รีโหลดรายการเพื่ออัปเดตค่าบนหน้า
-                })
-                .catch(err => alert(`เกิดข้อผิดพลาด: ${err.message}`));
             });
-          });
-        })
-        .catch(err => console.error(err));
-    }
+          }
 
-    // Logout handling
-    document.getElementById('logoutBtn').addEventListener('click', () => {
-      fetch('/logout')
-        .then(() => {
-          window.location.href = '/login.html';
+          if (isMerchant) {
+            merchants.push({ id: u._id || u.id, label: (u.name || u.username || (u._id||u.id)) });
+          }
         });
+
+        // เติม select ร้านค้า
+        const sel = $('merchantSelect');
+        sel.innerHTML = '';
+        const opt0 = document.createElement('option');
+        opt0.value = ''; opt0.textContent = '— เลือกร้านค้า —';
+        sel.appendChild(opt0);
+        merchants.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.id;
+          opt.textContent = `${m.label} (${m.id})`;
+          sel.appendChild(opt);
+        });
+
+        // ปุ่มอัปเดตเครดิตรายคน
+        tbody.querySelectorAll('button[data-id]').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const userId = btn.getAttribute('data-id');
+            const input = btn.parentElement.querySelector('input');
+            const newCredit = parseFloat(input.value);
+            if (isNaN(newCredit)) { alert('กรุณากรอกจำนวนเครดิตที่ถูกต้อง'); return; }
+            try{
+              const res = await fetch(`/api/users/${userId}/credit`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ credit: newCredit })
+              });
+              const body = await res.text();
+              if (!res.ok) throw new Error(body);
+              alert('อัปเดตสำเร็จ');
+              loadUsers();
+            }catch(e){ alert('เกิดข้อผิดพลาด: ' + (e.message||e)); }
+          });
+        });
+
+      }catch(e){
+        tbody.innerHTML = '<tr><td colspan="6">โหลดไม่สำเร็จ</td></tr>';
+      }
+    }
+    $('refreshUsers').addEventListener('click', loadUsers);
+    $('merchantSelect').addEventListener('change', e => $('stlMerchant').value = e.target.value || '');
+
+    // Logout
+    $('logoutBtn').addEventListener('click', () => {
+      fetch('/logout').then(() => { location.href = '/login.html'; });
     });
 
-    // Export summary handling
-    document.getElementById('exportBtn').addEventListener('click', () => {
-      // Trigger download of the Excel summary for all users.  Navigating
-      // directly to the API endpoint will prompt the browser to
-      // download the generated .xlsx file.
-      window.location.href = '/api/export-users';
-    });
+    // Export users CSV (รวมยอดผู้ใช้ทั้งหมด)
+    $('exportBtn').addEventListener('click', () => { window.open('/api/export-users', '_blank'); });
 
-    // Import employees from CSV
-    document.getElementById('importForm').addEventListener('submit', async function(e) {
+    // Import CSV (พนักงาน)
+    $('importForm').addEventListener('submit', async function(e){
       e.preventDefault();
       const formData = new FormData(this);
-      try {
-        const res = await fetch('/api/import-employees', {
-          method: 'POST',
-          body: formData
-        });
+      try{
+        const res = await fetch('/api/import-employees', { method:'POST', body: formData });
         const text = await res.text();
-        if (!res.ok) {
-          throw new Error(text);
-        }
+        if (!res.ok) throw new Error(text);
         alert(text);
-        // Refresh user list after import
         loadUsers();
-      } catch (err) {
-        alert(`เกิดข้อผิดพลาด: ${err.message}`);
-      }
+        this.reset();
+      }catch(err){ alert(`เกิดข้อผิดพลาด: ${err.message}`); }
     });
 
-    // Create merchant account
-    document.getElementById('createMerchantBtn').addEventListener('click', async () => {
-      const username = document.getElementById('merchantUsername').value.trim();
-      const password = document.getElementById('merchantPassword').value;
-      if (!username || !password) {
-        alert('กรุณากรอกชื่อผู้ใช้และรหัสผ่านของร้านค้า');
-        return;
-      }
-      try {
+    // Create merchant
+    $('createMerchantBtn').addEventListener('click', async ()=>{
+      const username = $('merchantUsername').value.trim();
+      const password = $('merchantPassword').value;
+      const msg = $('merchantMsg'); msg.style.display='none';
+      if (!username || !password) { showMsg(msg, 'กรุณากรอกชื่อผู้ใช้และรหัสผ่านของร้านค้า', 'error'); return; }
+      try{
         const res = await fetch('/register', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          body: new URLSearchParams({ username, password, role: 'merchant' }).toString()
+          method:'POST',
+          headers:{ 'Content-Type':'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ username, password, role:'merchant' }).toString()
         });
         const text = await res.text();
-        if (!res.ok) {
-          throw new Error(text);
-        }
-        alert(text);
-        // ล้างฟอร์มแล้วรีโหลดผู้ใช้
-        document.getElementById('merchantUsername').value = '';
-        document.getElementById('merchantPassword').value = '';
-        // reload users to show new merchant
+        if (!res.ok) throw new Error(text);
+        showMsg(msg, 'สร้างร้านค้าสำเร็จ ✅', 'success');
+        $('merchantUsername').value=''; $('merchantPassword').value='';
         loadUsers();
-      } catch (err) {
-        alert(`เกิดข้อผิดพลาด: ${err.message}`);
-      }
+      }catch(err){ showMsg(msg, err.message || 'เกิดข้อผิดพลาด', 'error'); }
+    });
+
+    // ===== Settlement (Lite) =====
+    $('btnPreview').addEventListener('click', async ()=>{
+      const merchantId = $('stlMerchant').value.trim();
+      const date = $('stlDate').value;
+      const out = $('stlPreview');
+      if(!merchantId || !date){ out.textContent = 'กรุณาเลือกร้านค้าและวันที่'; return; }
+      out.textContent = 'กำลังคำนวณ…';
+      try{
+        const r = await fetch(`/api/settlement/preview?merchantId=${encodeURIComponent(merchantId)}&date=${encodeURIComponent(date)}`);
+        const j = await r.json();
+        if(!r.ok) throw new Error(j.message || 'preview failed');
+        out.textContent = JSON.stringify(j, null, 2);
+      }catch(e){ out.textContent = 'ผิดพลาด: ' + (e.message || e); }
+    });
+
+    $('btnCommit').addEventListener('click', async ()=>{
+      const merchantId = $('stlMerchant').value.trim();
+      const date = $('stlDate').value;
+      const out = $('stlPreview');
+      if(!merchantId || !date){ out.textContent = 'กรุณาเลือกร้านค้าและวันที่'; return; }
+      out.textContent = 'กำลังปิดรอบ…';
+      try{
+        const r = await fetch('/api/settlement/commit', {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ merchantId, date })
+        });
+        const j = await r.json();
+        if(!r.ok) throw new Error(j.message || 'commit failed');
+        out.textContent = JSON.stringify(j, null, 2);
+        const sid = j.settlement_id;
+        // ดาวน์โหลดไฟล์ CSV สองชุด
+        window.open(`/api/settlement/${encodeURIComponent(sid)}/export-ledger.csv`, '_blank');
+        window.open(`/api/settlement/${encodeURIComponent(sid)}/export-summary.csv`, '_blank');
+        // รีโหลดเพื่ออัปเดตยอดเครดิตร้าน
+        loadUsers();
+      }catch(e){ out.textContent = 'ผิดพลาด: ' + (e.message || e); }
     });
   </script>
 </body>

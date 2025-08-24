@@ -345,5 +345,283 @@ app.get('/api/user-basic', ensureAuthenticated, async (req, res) => {
   }
 });
 
+
+// ===== Settlement (Lite) – Preview / Commit / Export (Admin only) =====
+const { ObjectId } = mongoose.Types;
+
+// helper: แปลง 'YYYY-MM-DD' (Bangkok) → [start,end)
+function thaiDayRange(dateStr /* 'YYYY-MM-DD' */) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr || '')) {
+    throw new Error('รูปแบบวันที่ไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD)');
+  }
+  const start = new Date(`${dateStr}T00:00:00+07:00`);
+  const end   = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
+// helper: ทำ settlement id อ่านง่าย
+function makeSettlementId(merchantId, dateStr) {
+  return `d${dateStr}_m${merchantId}`;
+}
+
+// สร้างบัญชีระบบปลายทาง payout ถ้าไม่เจอ
+async function ensureSystemClearingUser() {
+  let u = await User.findOne({ username: '_system_clearing' });
+  if (!u) {
+    const pwd = crypto.randomBytes(6).toString('hex');
+    const hashed = await bcrypt.hash(pwd, 10);
+    u = await User.create({
+      username: '_system_clearing',
+      password: hashed,
+      role: 'admin',
+      name: 'SYSTEM_CLEARING',
+      credit: 0
+    });
+  }
+  return u;
+}
+
+/**
+ * GET /api/settlement/preview?merchantId=<id>&date=YYYY-MM-DD
+ * แสดงยอดรวม/จำนวนรายการของธุรกรรม pay → merchant ที่ยังไม่ปิดรอบ ของวันนั้น
+ */
+app.get('/api/settlement/preview',
+  ensureAuthenticated, ensureRole('admin'),
+  async (req, res) => {
+    try {
+      const { merchantId, date } = req.query;
+      if (!merchantId || !ObjectId.isValid(merchantId)) {
+        return res.status(400).json({ ok: false, message: 'merchantId ไม่ถูกต้อง' });
+      }
+      if (!date) return res.status(400).json({ ok: false, message: 'ต้องระบุ date' });
+
+      const { start, end } = thaiDayRange(date);
+
+      // ตรวจร้าน
+      const merchant = await User.findOne({ _id: merchantId, role: 'merchant' })
+        .select('username name credit').lean();
+      if (!merchant) return res.status(404).json({ ok: false, message: 'ไม่พบร้านค้า' });
+
+      const match = { to: new ObjectId(merchantId), type: 'pay', settled: false, createdAt: { $gte: start, $lt: end } };
+      const agg = await Transaction.aggregate([
+        { $match: match },
+        { $group: { _id: null, tx_count: { $sum: 1 }, gross_amount: { $sum: '$amount' },
+                    first_at: { $min: '$createdAt' }, last_at: { $max: '$createdAt' } } }
+      ]);
+
+      const tx_count = agg[0]?.tx_count || 0;
+      const gross = agg[0]?.gross_amount || 0;
+      const settlement_id = makeSettlementId(merchantId, date);
+
+      return res.json({
+        ok: true,
+        merchant: {
+          id: merchantId,
+          name: merchant.name || merchant.username,
+          credit_current: merchant.credit || 0
+        },
+        period: { start, end, date },
+        settlement_id,
+        tx_count,
+        gross_amount: gross,
+        net_amount: gross // โหมด Lite: ไม่มีค่าธรรมเนียม
+      });
+    } catch (e) {
+      console.error('preview error:', e);
+      res.status(500).json({ ok: false, message: 'server error' });
+    }
+  }
+);
+
+/**
+ * POST /api/settlement/commit
+ * body: { merchantId, date }  // date = YYYY-MM-DD (Bangkok)
+ * ทำ: คำนวณยอด → บันทึก payout → มาร์ก pay เป็น settled (ทั้งหมดใน txn เดียว)
+ */
+app.post('/api/settlement/commit',
+  ensureAuthenticated, ensureRole('admin'),
+  async (req, res) => {
+    const sessionDb = await mongoose.startSession();
+    sessionDb.startTransaction();
+    try {
+      const { merchantId, date } = req.body;
+      if (!merchantId || !ObjectId.isValid(merchantId)) {
+        throw new Error('merchantId ไม่ถูกต้อง');
+      }
+      if (!date) throw new Error('ต้องระบุ date');
+
+      const { start, end } = thaiDayRange(date);
+      const merchant = await User.findOne({ _id: merchantId, role: 'merchant' })
+        .select('_id username name credit').session(sessionDb);
+      if (!merchant) throw new Error('ไม่พบร้านค้า');
+
+      // ดึงยอดรวมของ pay ที่ยังไม่ปิด
+      const match = { to: merchant._id, type: 'pay', settled: false, createdAt: { $gte: start, $lt: end } };
+      const agg = await Transaction.aggregate([
+        { $match: match },
+        { $group: { _id: null, tx_count: { $sum: 1 }, gross_amount: { $sum: '$amount' } } }
+      ]).session(sessionDb);
+
+      const tx_count = agg[0]?.tx_count || 0;
+      const gross = agg[0]?.gross_amount || 0;
+      if (tx_count === 0 || gross <= 0) {
+        await sessionDb.abortTransaction();
+        sessionDb.endSession();
+        return res.status(400).json({ ok: false, message: 'ไม่มีธุรกรรมที่ต้องปิดรอบในวันนั้น' });
+      }
+
+      const settlement_id = makeSettlementId(String(merchant._id), date);
+      const now = new Date();
+
+      // สร้างบัญชีระบบ (ปลายทาง payout)
+      const sys = await ensureSystemClearingUser();
+
+      // 1) ลดเครดิตร้าน
+      const updated = await User.findOneAndUpdate(
+        { _id: merchant._id, credit: { $gte: gross } },
+        { $inc: { credit: -gross } },
+        { new: true, session: sessionDb }
+      );
+      if (!updated) throw new Error('เครดิตร้านไม่พอสำหรับการปิดรอบ');
+
+      // 2) บันทึก payout (journal) จากร้าน → system
+      await Transaction.create([{
+        from: merchant._id,
+        to: sys._id,
+        type: 'payout',
+        amount: gross,
+        createdAt: now,
+        settled: true,
+        settlement_id,
+        settled_at: now
+      }], { session: sessionDb });
+
+      // 3) มาร์ก pay ทั้งหมดในวันนั้นว่า settled
+      await Transaction.updateMany(
+        match,
+        { $set: { settled: true, settlement_id, settled_at: now } },
+        { session: sessionDb }
+      );
+
+      await sessionDb.commitTransaction();
+      sessionDb.endSession();
+
+      return res.json({
+        ok: true,
+        settlement_id,
+        date,
+        merchant: { id: String(merchant._id), name: merchant.name || merchant.username },
+        tx_count,
+        gross_amount: gross,
+        net_amount: gross,
+        merchant_credit_after: updated.credit
+      });
+    } catch (e) {
+      await sessionDb.abortTransaction().catch(()=>{});
+      sessionDb.endSession();
+      console.error('commit error:', e);
+      res.status(400).json({ ok: false, message: e.message || 'commit failed' });
+    }
+  }
+);
+
+/**
+ * GET /api/settlement/:sid/export-ledger.csv
+ * ส่งออกบรรทัดธุรกรรม pay ที่ถูกปิดด้วย settlement_id = :sid
+ */
+app.get('/api/settlement/:sid/export-ledger.csv',
+  ensureAuthenticated, ensureRole('admin'),
+  async (req, res) => {
+    try {
+      const sid = req.params.sid;
+      const txs = await Transaction.find({ settlement_id: sid, type: 'pay' })
+        .select('createdAt from to amount settled settlement_id settled_at')
+        .lean();
+
+      // ชื่อร้านเพื่อออกรายงาน
+      const merchantId = sid.split('_m')[1];
+      const merchant = merchantId ? await User.findById(merchantId).select('name username').lean() : null;
+
+      let csvText = 'settlement_id,merchant_id,merchant_name,tx_id,created_at_utc,created_at_th,from_id,to_id,amount,settled,settled_at_th\n';
+      for (const t of txs) {
+        const th = t.createdAt ? new Date(t.createdAt).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }) : '';
+        const st = t.settled_at ? new Date(t.settled_at).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }) : '';
+        const mName = merchant ? (merchant.name || merchant.username) : '';
+        csvText += [
+          sid,
+          merchantId || '',
+          mName.includes(',') ? `"${mName}"` : mName,
+          String(t._id),
+          t.createdAt ? new Date(t.createdAt).toISOString() : '',
+          th,
+          t.from ? String(t.from) : '',
+          t.to ? String(t.to) : '',
+          t.amount ?? '',
+          t.settled ? 'true' : 'false',
+          st
+        ].join(',') + '\n';
+      }
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename=${sid}_ledger.csv`);
+      res.send('\uFEFF' + csvText);
+    } catch (e) {
+      console.error('export-ledger error:', e);
+      res.status(500).send('server error');
+    }
+  }
+);
+
+/**
+ * GET /api/settlement/:sid/export-summary.csv
+ * สรุปยอดรวมของรอบนั้นจากข้อมูลใน DB
+ */
+app.get('/api/settlement/:sid/export-summary.csv',
+  ensureAuthenticated, ensureRole('admin'),
+  async (req, res) => {
+    try {
+      const sid = req.params.sid;
+
+      const merchantId = sid.split('_m')[1];
+      const merchant = merchantId ? await User.findById(merchantId).select('name username').lean() : null;
+
+      const agg = await Transaction.aggregate([
+        { $match: { settlement_id: sid, type: 'pay' } },
+        { $group: { _id: null, tx_count: { $sum: 1 }, gross_amount: { $sum: '$amount' },
+                    first_at: { $min: '$createdAt' }, last_at: { $max: '$createdAt' } } }
+      ]);
+
+      const tx_count = agg[0]?.tx_count || 0;
+      const gross = agg[0]?.gross_amount || 0;
+      const firstAt = agg[0]?.first_at ? new Date(agg[0].first_at) : null;
+      const lastAt  = agg[0]?.last_at  ? new Date(agg[0].last_at)  : null;
+
+      // เดาวันจาก sid (dYYYY-MM-DD_m<id>)
+      const dateMatch = /^d(\d{4}-\d{2}-\d{2})_m/.exec(sid);
+      const dateStr = dateMatch ? dateMatch[1] : '';
+
+      let csvText = 'settlement_id,merchant_id,merchant_name,date,tx_count,gross_amount,net_amount,first_tx_th,last_tx_th\n';
+      const mName = merchant ? (merchant.name || merchant.username) : '';
+      csvText += [
+        sid,
+        merchantId || '',
+        mName.includes(',') ? `"${mName}"` : mName,
+        dateStr,
+        tx_count,
+        gross,
+        gross, // net = gross (โหมด Lite)
+        firstAt ? firstAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }) : '',
+        lastAt  ? lastAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })  : ''
+      ].join(',') + '\n';
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename=${sid}_summary.csv`);
+      res.send('\uFEFF' + csvText);
+    } catch (e) {
+      console.error('export-summary error:', e);
+      res.status(500).send('server error');
+    }
+  }
+);
+
 // Start
 app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
