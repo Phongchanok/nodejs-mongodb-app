@@ -45,6 +45,27 @@
       <tbody id="users-body"></tbody>
     </table>
 
+    <!-- 🔸 ตัวควบคุมการแบ่งหน้า -->
+    <div class="row mt-1" style="justify-content:space-between; align-items:center;">
+      <div class="row">
+        <button id="firstPage">« หน้าแรก</button>
+        <button id="prevPage">‹ ก่อนหน้า</button>
+        <span id="pageInfo" class="hint">หน้า 1/1</span>
+        <button id="nextPage">ถัดไป ›</button>
+        <button id="lastPage">หน้าสุดท้าย »</button>
+      </div>
+      <div class="row">
+        <label for="pageSize" class="hint">แสดงต่อหน้า:</label>
+        <select id="pageSize">
+          <option value="10" selected>10</option>
+          <option value="25">25</option>
+          <option value="50">50</option>
+        </select>
+        <span id="rangeInfo" class="hint">แถว 0–0 จาก 0</span>
+      </div>
+    </div>
+    <!-- /ตัวควบคุมการแบ่งหน้า -->
+
     <h3 class="mt-3">📁 นำเข้าข้อมูลพนักงานจากไฟล์ CSV</h3>
     <form id="importForm" enctype="multipart/form-data" class="mt-1">
       <input type="file" name="file" accept=".csv" required />
@@ -86,7 +107,7 @@
       el.style.display = 'block';
     }
 
-    // ==== FIX: helper ดาวน์โหลดไฟล์แบบไม่โดน popup blocker ====
+    // ==== helper ดาวน์โหลดไฟล์แบบไม่โดน popup blocker ====
     async function downloadCSV(url, filename){
       const res = await fetch(url, { credentials: 'same-origin' });
       if (!res.ok) throw new Error(await res.text());
@@ -99,6 +120,97 @@
       a.click();
       a.remove();
       URL.revokeObjectURL(href);
+    }
+
+    // ===== Pagination state =====
+    let allUsers = [];
+    let currentPage = 1;
+    let pageSize = 10;
+
+    const pageInfoEl  = $('pageInfo');
+    const rangeInfoEl = $('rangeInfo');
+
+    function updatePagerLabels() {
+      const total = allUsers.length;
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      currentPage = Math.min(Math.max(1, currentPage), totalPages);
+
+      const startIdx = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+      const endIdx   = Math.min(currentPage * pageSize, total);
+
+      pageInfoEl.textContent  = `หน้า ${currentPage}/${totalPages}`;
+      rangeInfoEl.textContent = `แถว ${startIdx}–${endIdx} จาก ${total}`;
+    }
+
+    function renderUsersPage() {
+      const tbody = $('users-body');
+      tbody.innerHTML = '';
+
+      const total = allUsers.length;
+      if (total === 0) {
+        tbody.innerHTML = '<tr><td colspan="6">ไม่มีข้อมูลผู้ใช้</td></tr>';
+        updatePagerLabels();
+        return;
+      }
+
+      const start = (currentPage - 1) * pageSize;
+      const end   = Math.min(start + pageSize, total);
+      const pageUsers = allUsers.slice(start, end);
+
+      pageUsers.forEach(u => {
+        const tr = document.createElement('tr');
+        const isMerchant = u.role === 'merchant';
+        tr.innerHTML = `
+          <td>${u.name || ''}</td>
+          <td>${isMerchant ? `<a class="copy" data-copy="${u._id||u.id||''}">${u.username}</a>` : u.username}</td>
+          <td>${u.role}</td>
+          <td>${u.credit}</td>
+          <td class="user-row">
+            <input type="number" value="${u.credit}" min="0" />
+            <button data-id="${u._id}">อัปเดต</button>
+          </td>
+          <td>${u._id || u.id || ''}</td>
+        `;
+        tbody.appendChild(tr);
+
+        // คลิก username ร้านค้า = คัดลอก merchantId
+        const cp = tr.querySelector('a.copy');
+        if (cp) {
+          cp.addEventListener('click', () => {
+            const mid = cp.getAttribute('data-copy') || '';
+            if (mid) {
+              navigator.clipboard.writeText(mid).catch(()=>{});
+              $('stlMerchant').value = mid;
+              $('merchantSelect').value = mid;
+            }
+          });
+        }
+      });
+
+      // ปุ่มอัปเดตเครดิตเฉพาะที่แสดงในหน้านี้
+      tbody.querySelectorAll('button[data-id]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const userId = btn.getAttribute('data-id');
+          const input = btn.parentElement.querySelector('input');
+          const newCredit = parseFloat(input.value);
+          if (isNaN(newCredit)) { alert('กรุณากรอกจำนวนเครดิตที่ถูกต้อง'); return; }
+          try{
+            const res = await fetch(`/api/users/${userId}/credit`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ credit: newCredit })
+            });
+            const body = await res.text();
+            if (!res.ok) throw new Error(body);
+            alert('อัปเดตสำเร็จ');
+            // รีเฟรชข้อมูลเพื่อความถูกต้อง (จะกลับไปหน้า 1)
+            await loadUsers();
+            // ถ้าอยากคงหน้าปัจจุบัน: อัปเดตใน allUsers แล้ว renderUsersPage() แทน
+          }catch(e){ alert('เกิดข้อผิดพลาด: ' + (e.message||e)); }
+        });
+      });
+
+      updatePagerLabels();
     }
 
     // ตรวจ role ปัจจุบัน
@@ -121,43 +233,15 @@
       tbody.innerHTML = '<tr><td colspan="6">กำลังโหลด…</td></tr>';
       try{
         const users = await fetch('/api/users').then(r=>r.json());
-        tbody.innerHTML = '';
-        const merchants = [];
-        users.forEach(u => {
-          const tr = document.createElement('tr');
-          const isMerchant = u.role === 'merchant';
-          tr.innerHTML = `
-            <td>${u.name || ''}</td>
-            <td>${isMerchant ? `<a class="copy" data-copy="${u._id||u.id||''}">${u.username}</a>` : u.username}</td>
-            <td>${u.role}</td>
-            <td>${u.credit}</td>
-            <td class="user-row">
-              <input type="number" value="${u.credit}" min="0" />
-              <button data-id="${u._id}">อัปเดต</button>
-            </td>
-            <td>${u._id || u.id || ''}</td>
-          `;
-          tbody.appendChild(tr);
-
-          // คัดลอก merchantId เมื่อคลิกชื่อร้าน
-          const cp = tr.querySelector('a.copy');
-          if (cp) {
-            cp.addEventListener('click', () => {
-              const mid = cp.getAttribute('data-copy') || '';
-              if (mid) {
-                navigator.clipboard.writeText(mid).catch(()=>{});
-                $('stlMerchant').value = mid;
-                $('merchantSelect').value = mid;
-              }
-            });
-          }
-
-          if (isMerchant) {
-            merchants.push({ id: u._id || u.id, label: (u.name || u.username || (u._id||u.id)) });
-          }
-        });
+        allUsers = users || [];
+        currentPage = 1; // เริ่มต้นที่หน้า 1 ทุกครั้งที่โหลดใหม่
+        renderUsersPage();
 
         // เติม select ร้านค้า
+        const merchants = allUsers
+          .filter(u => u.role === 'merchant')
+          .map(u => ({ id: u._id || u.id, label: (u.name || u.username || (u._id||u.id)) }));
+
         const sel = $('merchantSelect');
         sel.innerHTML = '';
         const opt0 = document.createElement('option');
@@ -170,31 +254,26 @@
           sel.appendChild(opt);
         });
 
-        // ปุ่มอัปเดตเครดิตรายคน
-        tbody.querySelectorAll('button[data-id]').forEach(btn => {
-          btn.addEventListener('click', async () => {
-            const userId = btn.getAttribute('data-id');
-            const input = btn.parentElement.querySelector('input');
-            const newCredit = parseFloat(input.value);
-            if (isNaN(newCredit)) { alert('กรุณากรอกจำนวนเครดิตที่ถูกต้อง'); return; }
-            try{
-              const res = await fetch(`/api/users/${userId}/credit`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ credit: newCredit })
-              });
-              const body = await res.text();
-              if (!res.ok) throw new Error(body);
-              alert('อัปเดตสำเร็จ');
-              loadUsers();
-            }catch(e){ alert('เกิดข้อผิดพลาด: ' + (e.message||e)); }
-          });
-        });
-
       }catch(e){
-        tbody.innerHTML = '<tr><td colspan="6">โหลดไม่สำเร็จ</td></tr>';
+        $('users-body').innerHTML = '<tr><td colspan="6">โหลดไม่สำเร็จ</td></tr>';
+        allUsers = [];
+        updatePagerLabels();
       }
     }
+
+    // ปุ่มเปลี่ยนหน้า
+    $('firstPage').addEventListener('click', () => { currentPage = 1; renderUsersPage(); });
+    $('prevPage').addEventListener('click',  () => { currentPage = Math.max(1, currentPage - 1); renderUsersPage(); });
+    $('nextPage').addEventListener('click',  () => { const max = Math.max(1, Math.ceil(allUsers.length / pageSize)); currentPage = Math.min(max, currentPage + 1); renderUsersPage(); });
+    $('lastPage').addEventListener('click',  () => { currentPage = Math.max(1, Math.ceil(allUsers.length / pageSize)); renderUsersPage(); });
+
+    // เปลี่ยนจำนวนต่อหน้า
+    $('pageSize').addEventListener('change', e => {
+      pageSize = parseInt(e.target.value, 10) || 10;
+      currentPage = 1;
+      renderUsersPage();
+    });
+
     $('refreshUsers').addEventListener('click', loadUsers);
     $('merchantSelect').addEventListener('change', e => $('stlMerchant').value = e.target.value || '');
 
@@ -203,7 +282,7 @@
       fetch('/logout').then(() => { location.href = '/login.html'; });
     });
 
-    // Export users CSV (รวมยอดผู้ใช้ทั้งหมด) — ใช้ downloadCSV กัน popup
+    // Export users CSV
     $('exportBtn').addEventListener('click', async () => {
       try{
         await downloadCSV('/api/export-users', 'users_summary.csv');
@@ -221,7 +300,7 @@
         const text = await res.text();
         if (!res.ok) throw new Error(text);
         alert(text);
-        loadUsers();
+        await loadUsers();
         this.reset();
       }catch(err){ alert(`เกิดข้อผิดพลาด: ${err.message}`); }
     });
@@ -242,7 +321,7 @@
         if (!res.ok) throw new Error(text);
         showMsg(msg, 'สร้างร้านค้าสำเร็จ ✅', 'success');
         $('merchantUsername').value=''; $('merchantPassword').value='';
-        loadUsers();
+        await loadUsers();
       }catch(err){ showMsg(msg, err.message || 'เกิดข้อผิดพลาด', 'error'); }
     });
 
@@ -280,12 +359,10 @@
         out.textContent = JSON.stringify(j, null, 2);
         const sid = j.settlement_id;
 
-        // ดาวน์โหลดไฟล์ CSV (สรุปก่อน แล้วตามด้วยบรรทัดธุรกรรม)
         await downloadCSV(`/api/settlement/${encodeURIComponent(sid)}/export-summary.csv`, `${sid}_summary.csv`);
         await downloadCSV(`/api/settlement/${encodeURIComponent(sid)}/export-ledger.csv`,  `${sid}_ledger.csv`);
 
-        // รีโหลดเพื่ออัปเดตยอดเครดิตร้าน
-        loadUsers();
+        await loadUsers();
       }catch(e){
         out.textContent = 'ผิดพลาด: ' + (e.message || e);
       } finally {
