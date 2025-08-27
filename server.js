@@ -295,43 +295,102 @@ app.get('/api/export-users', ensureAuthenticated, ensureRole('admin'), async (re
 });
 
 // Admin: import employees from CSV
-app.post('/api/import-employees', ensureAuthenticated, ensureRole('admin'), upload.single('file'), (req, res) => {
-  if (!req.file) return res.status(400).send('ไม่พบไฟล์ที่อัปโหลด');
+app.post(
+  '/api/import-employees',
+  ensureAuthenticated,
+  ensureRole('admin'),
+  upload.single('file'),
+  (req, res) => {
+    if (!req.file) return res.status(400).send('ไม่พบไฟล์ที่อัปโหลด');
 
-  const rows = [];
-  fs.createReadStream(req.file.path)
-    .pipe(csv.parse({ columns: true, trim: true }))
-    .on('data', row => rows.push(row))
-    .on('end', async () => {
-      try {
-        for (const row of rows) {
-          const name = row.name || row.Name || row['ชื่อ'];
-          const employeeCode = row.employeeCode || row.EmployeeCode || row['รหัสพนักงาน'];
-          const startDate = row.startDate || row.StartDate || row['วันเริ่มงาน'];
-          if (!employeeCode || !startDate) continue;
-          const hashed = await bcrypt.hash(startDate, 10);
-          await User.updateOne(
-            { username: employeeCode },
-            {
-              username: employeeCode,
-              password: hashed,
-              role: 'user',
-              name: name || employeeCode,
-              employeeCode,
-              startDate
-            },
-            { upsert: true }
-          );
-        }
-        res.send('นำเข้าข้อมูลพนักงานเรียบร้อยแล้ว');
-      } catch (err) {
-        console.error('Error importing employees:', err);
-        res.status(500).send('เกิดข้อผิดพลาดในการนำเข้าข้อมูล');
-      } finally {
-        fs.unlink(req.file.path, () => {});
+    const rows = [];
+    const cleanup = () => fs.unlink(req.file.path, () => {});
+
+    const pick = (...cands) => cands.find(v => v != null && String(v).trim() !== '');
+    const toISODate = (s) => {
+      if (!s) return null;
+      let str = String(s).trim().replace(/\//g, '-');
+      let m = str.match(/^(\d{1,2})-(\d{1,2})-(\d{2,4})$/); // dd-mm-yyyy | dd-mm-yy
+      if (m) {
+        let [, d, mo, y] = m;
+        let year = parseInt(y, 10);
+        if (year < 100) year += 2000;      // 67 -> 2067 (ถ้าจะตีเป็น 1967 แก้ตามนโยบายคุณ)
+        if (year > 2400) year -= 543;      // พ.ศ. -> ค.ศ.
+        return `${year}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
       }
-    });
-});
+      m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); // yyyy-mm-dd
+      if (m) {
+        let [, y, mo, d] = m;
+        let year = parseInt(y, 10);
+        if (year > 2400) year -= 543;
+        return `${year}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      }
+      return null; // ไม่รู้ฟอร์แมต
+    };
+
+    fs.createReadStream(req.file.path)
+      .pipe(csv.parse({ columns: true, trim: true }))
+      .on('data', r => rows.push(r))
+      .on('error', err => {
+        console.error('CSV error:', err);
+        cleanup();
+        res.status(500).send('อ่านไฟล์ไม่สำเร็จ');
+      })
+      .on('end', async () => {
+        try {
+          const ops = [];
+          let skipped = 0;
+
+          for (const row of rows) {
+            const employeeCode = pick(row.employeeCode, row.EmployeeCode, row['รหัสพนักงาน']);
+            const startDateRaw = pick(row.startDate, row.StartDate, row['วันเริ่มงาน']);
+            if (!employeeCode || !startDateRaw) { skipped++; continue; }
+
+            const startDateISO = toISODate(startDateRaw);
+            if (!startDateISO) { skipped++; continue; }
+
+            // ตั้งรหัสผ่านเฉพาะตอน insert
+            const hashed = await bcrypt.hash(String(startDateISO), 10);
+
+            ops.push({
+              updateOne: {
+                filter: { username: employeeCode },
+                update: {
+                  $set: {
+                    username: employeeCode,
+                    role: 'user',
+                    name: employeeCode,     // ไม่มี name => ใช้ employeeCode แทน
+                    employeeCode,
+                    startDate: startDateISO,
+                  },
+                  $setOnInsert: { password: hashed }
+                },
+                upsert: true
+              }
+            });
+          }
+
+          if (ops.length === 0) return res.status(400).send('ไม่มีข้อมูลที่เหมาะสมสำหรับนำเข้า');
+
+          const result = await User.bulkWrite(ops, { ordered: false });
+          res.json({
+            message: 'นำเข้าข้อมูลพนักงานเรียบร้อยแล้ว',
+            summary: {
+              inserted: result.upsertedCount || 0,
+              updated: result.modifiedCount || 0,
+              skipped
+            }
+          });
+        } catch (err) {
+          console.error('Import error:', err);
+          res.status(500).send('เกิดข้อผิดพลาดในการนำเข้าข้อมูล');
+        } finally {
+          cleanup();
+        }
+      });
+  }
+);
+
 
 // Basic lookup (for showing merchant name on user page)
 app.get('/api/user-basic', ensureAuthenticated, async (req, res) => {
