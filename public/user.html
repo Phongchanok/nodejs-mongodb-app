@@ -66,6 +66,18 @@
     const PROMO_MESSAGE = '19th AMGT Happy Anniversary';
     const PROMO_ICON = '🎁';
 
+    // helper
+    function withLoading(btn, action) {
+      btn.classList.add('loading');
+      btn.disabled = true;
+      return Promise.resolve()
+        .then(action)
+        .finally(() => {
+          btn.classList.remove('loading');
+          btn.disabled = false;
+        });
+    }
+
     // ดึงข้อมูลผู้ใช้ปัจจุบัน
     window.currentUser = null;
     fetch('/api/me')
@@ -91,9 +103,8 @@
     // Modal helpers
     const overlay = document.getElementById('paymentOverlay');
     const closeModalBtn = document.getElementById('closeModal');
-    const promoBox = document.getElementById('promoBox'); // ← เพิ่มบรรทัดนี้
+    const promoBox = document.getElementById('promoBox');
 
-    // เพิ่มพารามิเตอร์ note เข้ามา และใช้แสดงไอคอน+ข้อความ
     function openPaymentModal({merchantName, amount, timeText, remain, note}){
       document.getElementById('mName').textContent = merchantName;
       document.getElementById('mAmount').textContent = `${amount} เครดิต`;
@@ -105,7 +116,7 @@
           <span class="promo-icon" aria-hidden="true">${PROMO_ICON}</span>
           <span class="promo-text">${note}</span>
         `;
-        promoBox.style.display = 'flex';   // ให้ตรงกับ CSS ที่ตั้งไว้
+        promoBox.style.display = 'flex';
       } else {
         promoBox.style.display = 'none';
       }
@@ -131,115 +142,123 @@
     let lastMerchantId = null;
     let lastMerchantName = null;
 
-    document.getElementById('scanBtn').addEventListener('click', async () => {
-      if (!qrScanner) qrScanner = new Html5Qrcode('qr-reader');
-      const qrReader = document.getElementById('qr-reader');
-      const payBox = document.getElementById('payBox');
-      const infoBox = document.getElementById('merchantInfo');
+    const scanBtn = document.getElementById('scanBtn');
+    scanBtn.addEventListener('click', async () => {
+      await withLoading(scanBtn, async () => {
+        if (!qrScanner) qrScanner = new Html5Qrcode('qr-reader');
+        const qrReader = document.getElementById('qr-reader');
+        const payBox = document.getElementById('payBox');
+        const infoBox = document.getElementById('merchantInfo');
 
-      payBox.style.display = 'none';
-      infoBox.textContent = '';
-      qrReader.style.display = 'block';
+        payBox.style.display = 'none';
+        infoBox.textContent = '';
+        qrReader.style.display = 'block';
 
-      const onScanSuccess = async (decodedText) => {
-        try { await qrScanner.stop(); } catch (e) {}
-        qrReader.style.display = 'none';
+        const onScanSuccess = async (decodedText) => {
+          try { await qrScanner.stop(); } catch (e) {}
+          qrReader.style.display = 'none';
 
-        // รองรับ 2 รูปแบบ: (ใหม่){raw,sig} และ (เดิม){type,to}
-        let parsed;
-        try { parsed = JSON.parse(decodedText); }
-        catch { alert('QR ไม่ถูกต้อง'); return; }
+          // รองรับ 2 รูปแบบ: (ใหม่){raw,sig} และ (เดิม){type,to}
+          let parsed;
+          try { parsed = JSON.parse(decodedText); }
+          catch { alert('QR ไม่ถูกต้อง'); return; }
 
-        let merchantId;
-        if (parsed && parsed.raw && parsed.sig) {
-          try {
-            const data = base64UrlToJson(parsed.raw);
-            if (data?.type !== 'merchant-receive' || !data?.to) {
+          let merchantId;
+          if (parsed && parsed.raw && parsed.sig) {
+            try {
+              const data = base64UrlToJson(parsed.raw);
+              if (data?.type !== 'merchant-receive' || !data?.to) {
+                alert('QR ไม่ถูกต้อง'); return;
+              }
+              merchantId = data.to;
+              lastPayload = JSON.stringify({ raw: parsed.raw, sig: parsed.sig });
+            } catch {
               alert('QR ไม่ถูกต้อง'); return;
             }
-            merchantId = data.to;
-            lastPayload = JSON.stringify({ raw: parsed.raw, sig: parsed.sig });
-          } catch {
-            alert('QR ไม่ถูกต้อง'); return;
+          } else if (parsed?.type === 'merchant-receive' && parsed?.to) {
+            merchantId = parsed.to;
+            lastPayload = decodedText;
+          } else {
+            alert('QR นี้ไม่ใช่ของร้านค้าสำหรับรับเครดิต');
+            return;
           }
-        } else if (parsed?.type === 'merchant-receive' && parsed?.to) {
-          merchantId = parsed.to;
-          lastPayload = decodedText;
-        } else {
-          alert('QR นี้ไม่ใช่ของร้านค้าสำหรับรับเครดิต');
-          return;
-        }
 
-        lastMerchantId = merchantId;
-        lastMerchantName = await lookupUserBasic(merchantId);
+          lastMerchantId = merchantId;
+          lastMerchantName = await lookupUserBasic(merchantId);
 
-        infoBox.className = 'message success';
-        infoBox.textContent = `จะชำระให้ร้าน: ${lastMerchantName}`;
-        document.getElementById('payBox').style.display = 'block';
-      };
+          infoBox.className = 'message success';
+          infoBox.textContent = `จะชำระให้ร้าน: ${lastMerchantName}`;
+          document.getElementById('payBox').style.display = 'block';
+        };
 
-      const onScanFailure = () => { /* สแกนต่อเนื่อง */ };
+        const onScanFailure = () => { /* สแกนต่อเนื่อง */ };
 
-      try {
         await qrScanner.start(
           { facingMode: 'environment' },
           { fps: 10, qrbox: { width: 250, height: 250 } },
           onScanSuccess,
           onScanFailure
-        );
-      } catch (err) {
-        alert('ไม่สามารถเปิดกล้องได้: ' + err);
-      }
+        ).catch(err => {
+          alert('ไม่สามารถเปิดกล้องได้: ' + err);
+        });
+      });
     });
 
     // ยืนยันชำระ
-    document.getElementById('payBtn').addEventListener('click', async () => {
-      const raw = document.getElementById('payAmount').value;
-      const amount = Math.trunc(Number(raw));
-      if (!Number.isFinite(amount) || amount <= 0) {
-        alert('กรุณากรอกจำนวนเครดิตที่ถูกต้อง (จำนวนเต็ม > 0)');
-        return;
-      }
-      if (window.currentUser && amount > window.currentUser.credit) {
-        alert('เครดิตของคุณไม่พอ');
-        return;
-      }
-      if (!lastPayload) { alert('ยังไม่ได้สแกน QR ร้านค้า'); return; }
-      try {
-        const res = await fetch('/api/pay-qr', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ payload: lastPayload, amount })
-        });
-        const data = await (res.headers.get('content-type')?.includes('application/json') ? res.json() : res.text());
-        if (!res.ok) throw new Error(typeof data === 'string' ? data : (data.message || 'ชำระไม่สำเร็จ'));
+    const payBtn = document.getElementById('payBtn');
+    payBtn.addEventListener('click', async () => {
+      await withLoading(payBtn, async () => {
+        const raw = document.getElementById('payAmount').value;
+        const amount = Math.trunc(Number(raw));
+        if (!Number.isFinite(amount) || amount <= 0) {
+          alert('กรุณากรอกจำนวนเครดิตที่ถูกต้อง (จำนวนเต็ม > 0)');
+          return;
+        }
+        if (window.currentUser && amount > window.currentUser.credit) {
+          alert('เครดิตของคุณไม่พอ');
+          return;
+        }
+        if (!lastPayload) { alert('ยังไม่ได้สแกน QR ร้านค้า'); return; }
+        try {
+          const res = await fetch('/api/pay-qr', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ payload: lastPayload, amount })
+          });
+          const data = await (res.headers.get('content-type')?.includes('application/json') ? res.json() : res.text());
+          if (!res.ok) throw new Error(typeof data === 'string' ? data : (data.message || 'ชำระไม่สำเร็จ'));
 
-        // อัปเดตยอดคงเหลือจากเซิร์ฟเวอร์
-        const me = await fetch('/api/me').then(r => r.json());
-        window.currentUser = me;
-        document.getElementById('balance').textContent = `ยอดคงเหลือ: ${me.credit} เครดิต`;
+          // อัปเดตยอดคงเหลือจากเซิร์ฟเวอร์
+          const me = await fetch('/api/me').then(r => r.json());
+          window.currentUser = me;
+          document.getElementById('balance').textContent = `ยอดคงเหลือ: ${me.credit} เครดิต`;
 
-        // แสดง Modal สรุปผล + ข้อความพิเศษ (note)
-        const timeText = new Date().toLocaleString('th-TH');
-        openPaymentModal({
-          merchantName: lastMerchantName || lastMerchantId,
-          amount,
-          timeText,
-          remain: me.credit,
-          note: PROMO_MESSAGE     // << ส่งข้อความมาที่นี่
-        });
+          // แสดง Modal สรุปผล + ข้อความพิเศษ (note)
+          const timeText = new Date().toLocaleString('th-TH');
+          openPaymentModal({
+            merchantName: lastMerchantName || lastMerchantId,
+            amount,
+            timeText,
+            remain: me.credit,
+            note: PROMO_MESSAGE
+          });
 
-        // รีเซ็ตฟอร์มการจ่าย
-        document.getElementById('payAmount').value = '';
-        document.getElementById('payBox').style.display = 'none';
-      } catch (err) {
-        alert(err.message || 'เกิดข้อผิดพลาด');
-      }
+          // รีเซ็ตฟอร์มการจ่าย
+          document.getElementById('payAmount').value = '';
+          document.getElementById('payBox').style.display = 'none';
+        } catch (err) {
+          alert(err.message || 'เกิดข้อผิดพลาด');
+        }
+      });
     });
 
     // ออกจากระบบ
-    document.getElementById('logoutBtn').addEventListener('click', () => {
-      fetch('/logout').then(() => { window.location.href = '/login.html'; });
+    const logoutBtn = document.getElementById('logoutBtn');
+    logoutBtn.addEventListener('click', () => {
+      withLoading(logoutBtn, async () => {
+        await fetch('/logout');
+        window.location.href = '/login.html';
+      });
     });
   </script>
 </body>
