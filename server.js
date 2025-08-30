@@ -441,6 +441,35 @@ async function ensureSystemClearingUser() {
   return u;
 }
 
+// ===== CSV + User Lookup Helpers =====
+
+// escape CSV (รองรับ , " และ newline)
+function csvEscape(val) {
+  if (val === null || val === undefined) return '';
+  const s = String(val);
+  if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+// แปลง truthy strings -> boolean
+function parseBool(v) {
+  if (typeof v === 'boolean') return v;
+  const s = String(v || '').toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes' || s === 'y';
+}
+
+// ดึงผู้ใช้หลายคนครั้งเดียว -> Map<stringId, { _id, role, username, name }>
+async function loadUsersMapByIds(ids) {
+  const uniq = Array.from(new Set(ids.filter(Boolean).map(String)));
+  if (!uniq.length) return new Map();
+  const docs = await User.find({ _id: { $in: uniq } })
+    .select('_id role username name').lean();
+  const m = new Map();
+  for (const u of docs) m.set(String(u._id), u);
+  return m;
+}
+
+
 /**
  * GET /api/settlement/preview?merchantId=<id>&date=YYYY-MM-DD
  * แสดงยอดรวม/จำนวนรายการของธุรกรรม pay → merchant ที่ยังไม่ปิดรอบ ของวันนั้น
@@ -587,40 +616,94 @@ app.post('/api/settlement/commit',
 
 /**
  * GET /api/settlement/:sid/export-ledger.csv
- * ส่งออกบรรทัดธุรกรรม pay ที่ถูกปิดด้วย settlement_id = :sid
+ * ส่งออกบรรทัดธุรกรรม pay ของรอบ :sid
+ * ?includeNames=1 เพื่อเติมคอลัมน์อ่านง่าย (from_role/username/name, to_role/username/name)
  */
 app.get('/api/settlement/:sid/export-ledger.csv',
   ensureAuthenticated, ensureRole('admin'),
   async (req, res) => {
     try {
       const sid = req.params.sid;
+      const includeNames = parseBool(req.query.includeNames);
+
       const txs = await Transaction.find({ settlement_id: sid, type: 'pay' })
         .select('createdAt from to amount settled settlement_id settled_at')
         .lean();
 
-      // ชื่อร้านเพื่อออกรายงาน
-      const merchantId = sid.split('_m')[1];
-      const merchant = merchantId ? await User.findById(merchantId).select('name username').lean() : null;
+      // หา merchant เพื่อแสดงหัวรายงาน
+      const merchantId = (sid.split('_m')[1] || '').trim();
+      const merchant = merchantId
+        ? await User.findById(merchantId).select('name username role').lean()
+        : null;
 
-      let csvText = 'settlement_id,merchant_id,merchant_name,tx_id,created_at_utc,created_at_th,from_id,to_id,amount,settled,settled_at_th\n';
+      // เตรียม batch lookup
+      const allIds = [];
       for (const t of txs) {
-        const th = t.createdAt ? new Date(t.createdAt).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }) : '';
-        const st = t.settled_at ? new Date(t.settled_at).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }) : '';
-        const mName = merchant ? (merchant.name || merchant.username) : '';
-        csvText += [
-          sid,
-          merchantId || '',
-          mName.includes(',') ? `"${mName}"` : mName,
-          String(t._id),
-          t.createdAt ? new Date(t.createdAt).toISOString() : '',
-          th,
-          t.from ? String(t.from) : '',
-          t.to ? String(t.to) : '',
-          t.amount ?? '',
-          t.settled ? 'true' : 'false',
-          st
-        ].join(',') + '\n';
+        if (t.from) allIds.push(String(t.from));
+        if (t.to)   allIds.push(String(t.to));
       }
+      if (merchantId) allIds.push(merchantId);
+      const usersMap = await loadUsersMapByIds(allIds);
+
+      // header
+      const baseCols = [
+        'settlement_id','merchant_id','merchant_name',
+        'tx_id','created_at_utc','created_at_th',
+        'from_id','to_id','amount','settled','settled_at_th'
+      ];
+      const nameCols = [
+        'from_role','from_username','from_name',
+        'to_role','to_username','to_name'
+      ];
+      const cols = includeNames ? [...baseCols, ...nameCols] : baseCols;
+
+      const lines = [];
+      lines.push(cols.join(','));
+
+      const merchantName = merchant ? (merchant.name || merchant.username || '') : '';
+
+      for (const t of txs) {
+        const createdTH = t.createdAt
+          ? new Date(t.createdAt).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })
+          : '';
+        const settledTH = t.settled_at
+          ? new Date(t.settled_at).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })
+          : '';
+
+        const fromId = t.from ? String(t.from) : '';
+        const toId   = t.to   ? String(t.to)   : '';
+
+        const row = [
+          csvEscape(sid),
+          csvEscape(merchantId),
+          csvEscape(merchantName),
+          csvEscape(String(t._id)),
+          csvEscape(t.createdAt ? new Date(t.createdAt).toISOString() : ''),
+          csvEscape(createdTH),
+          csvEscape(fromId),
+          csvEscape(toId),
+          csvEscape(t.amount ?? ''),
+          csvEscape(t.settled ? 'true' : 'false'),
+          csvEscape(settledTH)
+        ];
+
+        if (includeNames) {
+          const fu = usersMap.get(fromId) || {};
+          const tu = usersMap.get(toId)   || {};
+          row.push(
+            csvEscape(fu.role || ''),
+            csvEscape(fu.username || ''),
+            csvEscape(fu.name || ''),
+            csvEscape(tu.role || ''),
+            csvEscape(tu.username || ''),
+            csvEscape(tu.name || '')
+          );
+        }
+
+        lines.push(row.join(','));
+      }
+
+      const csvText = lines.join('\n');
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename=${sid}_ledger.csv`);
       res.send('\uFEFF' + csvText);
@@ -633,46 +716,70 @@ app.get('/api/settlement/:sid/export-ledger.csv',
 
 /**
  * GET /api/settlement/:sid/export-summary.csv
- * สรุปยอดรวมของรอบนั้นจากข้อมูลใน DB
+ * สรุปรวมของรอบ :sid
+ * ?includeNames=1 เพื่อเติม merchant_username/merchant_role
  */
 app.get('/api/settlement/:sid/export-summary.csv',
   ensureAuthenticated, ensureRole('admin'),
   async (req, res) => {
     try {
       const sid = req.params.sid;
+      const includeNames = parseBool(req.query.includeNames);
 
-      const merchantId = sid.split('_m')[1];
-      const merchant = merchantId ? await User.findById(merchantId).select('name username').lean() : null;
+      const merchantId = (sid.split('_m')[1] || '').trim();
+      const merchant = merchantId
+        ? await User.findById(merchantId).select('name username role').lean()
+        : null;
 
       const agg = await Transaction.aggregate([
         { $match: { settlement_id: sid, type: 'pay' } },
-        { $group: { _id: null, tx_count: { $sum: 1 }, gross_amount: { $sum: '$amount' },
-                    first_at: { $min: '$createdAt' }, last_at: { $max: '$createdAt' } } }
+        { $group: { _id: null,
+          tx_count:     { $sum: 1 },
+          gross_amount: { $sum: '$amount' },
+          first_at:     { $min: '$createdAt' },
+          last_at:      { $max: '$createdAt' } } }
       ]);
 
       const tx_count = agg[0]?.tx_count || 0;
-      const gross = agg[0]?.gross_amount || 0;
-      const firstAt = agg[0]?.first_at ? new Date(agg[0].first_at) : null;
-      const lastAt  = agg[0]?.last_at  ? new Date(agg[0].last_at)  : null;
+      const gross    = agg[0]?.gross_amount || 0;
+      const firstAt  = agg[0]?.first_at ? new Date(agg[0].first_at) : null;
+      const lastAt   = agg[0]?.last_at  ? new Date(agg[0].last_at)  : null;
 
-      // เดาวันจาก sid (dYYYY-MM-DD_m<id>)
+      // เดาวันจาก sid: dYYYY-MM-DD_m...
       const dateMatch = /^d(\d{4}-\d{2}-\d{2})_m/.exec(sid);
       const dateStr = dateMatch ? dateMatch[1] : '';
 
-      let csvText = 'settlement_id,merchant_id,merchant_name,date,tx_count,gross_amount,net_amount,first_tx_th,last_tx_th\n';
-      const mName = merchant ? (merchant.name || merchant.username) : '';
-      csvText += [
-        sid,
-        merchantId || '',
-        mName.includes(',') ? `"${mName}"` : mName,
-        dateStr,
-        tx_count,
-        gross,
-        gross, // net = gross (โหมด Lite)
-        firstAt ? firstAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }) : '',
-        lastAt  ? lastAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })  : ''
-      ].join(',') + '\n';
+      const baseCols = [
+        'settlement_id','merchant_id','merchant_name','date',
+        'tx_count','gross_amount','net_amount','first_tx_th','last_tx_th'
+      ];
+      const nameCols = ['merchant_username','merchant_role'];
+      const cols = includeNames ? [...baseCols, ...nameCols] : baseCols;
 
+      const mName = merchant ? (merchant.name || merchant.username) : '';
+      const firstTh = firstAt ? firstAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }) : '';
+      const lastTh  = lastAt  ? lastAt.toLocaleString('th-TH',  { timeZone: 'Asia/Bangkok' }) : '';
+
+      const row = [
+        csvEscape(sid),
+        csvEscape(merchantId),
+        csvEscape(mName),
+        csvEscape(dateStr),
+        csvEscape(tx_count),
+        csvEscape(gross),
+        csvEscape(gross), // Lite: net = gross
+        csvEscape(firstTh),
+        csvEscape(lastTh)
+      ];
+
+      if (includeNames) {
+        row.push(
+          csvEscape(merchant ? merchant.username || '' : ''),
+          csvEscape(merchant ? merchant.role || '' : '')
+        );
+      }
+
+      const csvText = [cols.join(','), row.join(',')].join('\n');
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename=${sid}_summary.csv`);
       res.send('\uFEFF' + csvText);
@@ -682,6 +789,7 @@ app.get('/api/settlement/:sid/export-summary.csv',
     }
   }
 );
+
 
 // Start
 app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
