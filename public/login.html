@@ -30,10 +30,12 @@
       <label for="password">รหัสผ่าน</label>
       <input type="password" id="password" name="password" required>
 
-      <button type="submit">เข้าสู่ระบบ</button>
+      <button type="submit" id="loginBtn">เข้าสู่ระบบ</button>
     </form>
     <div class="link">
-      <p>หากคุณยังไม่มีบัญชี กรุณาติดต่อผู้ดูแลระบบ</p>
+      <p>หากพบปัญหาสามารถแจ้งแผนก GA</p>
+      <p>โทร.0, 1100, 1112, 1054</p>
+      
     </div>
   </div>
 
@@ -45,6 +47,10 @@
     // failure we display the server's error message to the user.
     document.getElementById('loginForm').addEventListener('submit', function (e) {
       e.preventDefault();
+      
+      const btn = document.getElementById('loginBtn');
+      btn.classList.add('loading');
+
       const username = document.getElementById('username').value.trim();
       const password = document.getElementById('password').value;
       if (!username || !password) {
@@ -83,6 +89,9 @@
         .catch((err) => {
           console.error('Login error', err);
           alert('ไม่สามารถเข้าสู่ระบบได้ กรุณาลองใหม่');
+        })
+        .finally(() => {
+            btn.classList.remove('loading');
         });
     });
   </script>
