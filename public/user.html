@@ -14,50 +14,104 @@
     .modal .row span:first-child{color:var(--text-secondary)}
     .modal .actions{margin-top:1rem;text-align:right}
 
-    /* ===== ปุ่มขณะโหลด ===== */
-    button.loading{position:relative;color:transparent!important;pointer-events:none}
-    button.loading::after{
-      content:"กำลังทำงาน...";
-      position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff
-    }
-    button.loading::before{
-      content:"";position:absolute;left:10px;top:50%;width:16px;height:16px;border:2px solid #fff;border-right-color:transparent;border-radius:50%;
-      transform:translateY(-50%);animation:spin .7s linear infinite
-    }
-    @keyframes spin{to{transform:translateY(-50%) rotate(360deg)}}
-
-    /* ===== promoBox เฉลิมฉลอง ===== */
+    /* ===== แทนที่ promoBox เดิมด้วยเวอร์ชันเฉลิมฉลองแบบเบา ===== */
     #promoBox{
-      display:none;margin-top:.75rem;position:relative;overflow:hidden;border-radius:12px;padding:12px 14px;
-      background:linear-gradient(180deg,#0f172a 0%,#111827 100%);border:1px solid rgba(255,255,255,.08);color:#fff
+      display:none;
+      margin-top:.75rem;
+      position:relative;
+      overflow:hidden;
+      border-radius:12px;
+      padding:12px 14px;
+      background: linear-gradient(180deg, #0f172a 0%, #111827 100%); /* กล่องพื้นเข้มอ่านง่าย */
+      border: 1px solid rgba(255,255,255,.08);
     }
-    .anniv-banner{ text-align:center; position:relative; z-index:1; }
+
+    /* แบนเนอร์ภายใน promoBox */
+    .anniv-banner{
+      text-align:center;
+      position:relative;
+      z-index:1;
+    }
     .anniv-banner .line{
-      font-family:"Kanit",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
-      font-weight:900; line-height:1.05; margin:2px 0; letter-spacing:.02em;
-      background-size:200% 200%; -webkit-background-clip:text; background-clip:text; color:transparent;
-      animation: shimmer 4s linear infinite, softGlow 3s ease-in-out infinite alternate; white-space:nowrap;
+      font-family: "Kanit", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-weight: 900;
+      line-height: 1.05;
+      margin: 2px 0;
+      letter-spacing: .02em;
+      background-size: 200% 200%;
+      -webkit-background-clip: text;
+              background-clip: text;
+      color: transparent;
+      text-shadow: 0 0 0 transparent;
+      animation: shimmer 4s linear infinite, softGlow 3s ease-in-out infinite alternate;
+      white-space: nowrap;
     }
-    .anniv-banner .line-top{ font-size:clamp(18px,4.8vw,26px); background-image:linear-gradient(120deg,#fff,#e5e7eb,#fff); }
-    .anniv-banner .line-main{ font-size:clamp(20px,6vw,30px); background-image:linear-gradient(120deg,#fde047,#facc15,#fef08a,#fde047); }
-    .anniv-banner .ico{ display:inline-block; font-size:1.15em; margin:0 .3em; filter:drop-shadow(0 2px 4px rgba(0,0,0,.45)); animation: floatY 3.8s ease-in-out infinite; vertical-align:-2px; }
-    .anniv-banner .ico.coupon{ animation-duration:4.4s; }
-    #promoBox .confetti{ position:absolute; inset:0; pointer-events:none; z-index:0; }
-    #promoBox .confetti i{ position:absolute; width:6px; height:10px; border-radius:2px; opacity:.85; animation: fall 1.8s linear infinite; }
+
+    /* บรรทัดบน: 19th AMGT (สีขาวนุ่ม) */
+    .anniv-banner .line-top{
+      font-size: clamp(18px, 4.8vw, 26px);
+      background-image: linear-gradient(120deg, #ffffff, #e5e7eb, #ffffff);
+    }
+
+    /* บรรทัดหลัก: Happy Anniversary (ทองนุ่ม อ่านง่าย) */
+    .anniv-banner .line-main{
+      font-size: clamp(20px, 6vw, 30px);
+      background-image: linear-gradient(120deg, #fde047, #facc15, #fef08a, #fde047);
+    }
+
+    /* ไอคอนประกอบ */
+    .anniv-banner .ico{
+      display:inline-block;
+      font-size: 1.15em;
+      margin: 0 .3em;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,.45));
+      animation: floatY 3.8s ease-in-out infinite;
+      vertical-align: -2px;
+    }
+    .anniv-banner .ico.coupon{ animation-duration: 4.4s; }
+
+    /* คอนเฟตตี้แบบเบา (CSS-only, 6 ชิ้น) */
+    #promoBox .confetti{
+      position:absolute; inset:0; pointer-events:none; z-index:0;
+    }
+    #promoBox .confetti i{
+      position:absolute;
+      width:6px; height:10px; border-radius:2px;
+      opacity:.85;
+      animation: fall 1.8s linear infinite;
+    }
+    /* สีคอนเฟตตี้ */
     #promoBox .confetti i:nth-child(1){ background:#f59e0b; left:8%;  animation-delay:0s; }
     #promoBox .confetti i:nth-child(2){ background:#ef4444; left:22%; animation-delay:.2s;}
     #promoBox .confetti i:nth-child(3){ background:#3b82f6; left:38%; animation-delay:.4s;}
     #promoBox .confetti i:nth-child(4){ background:#10b981; left:56%; animation-delay:.1s;}
     #promoBox .confetti i:nth-child(5){ background:#a855f7; left:74%; animation-delay:.35s;}
     #promoBox .confetti i:nth-child(6){ background:#eab308; left:88%; animation-delay:.55s;}
-    @keyframes shimmer{ 0%{background-position:0% 50%} 100%{background-position:200% 50%} }
-    @keyframes softGlow{ 0%{filter:drop-shadow(0 0 0px rgba(250,204,21,.35))} 100%{filter:drop-shadow(0 0 8px rgba(250,204,21,.6))} }
-    @keyframes floatY{ 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
-    @keyframes fall{ 0%{transform:translateY(-8px) rotate(0deg);opacity:0} 10%{opacity:.85} 100%{transform:translateY(56px) rotate(220deg);opacity:0} }
 
-    @media (prefers-reduced-motion:reduce){
-      .anniv-banner .line,.anniv-banner .ico{animation:none}
-      #promoBox .confetti i{animation:none;display:none}
+    /* Keyframes */
+    @keyframes shimmer{
+      0%{ background-position:0% 50%; }
+      100%{ background-position:200% 50%; }
+    }
+    @keyframes softGlow{
+      0%{ filter: drop-shadow(0 0 0px rgba(250, 204, 21, .35)); }
+      100%{ filter: drop-shadow(0 0 8px rgba(250, 204, 21, .6)); }
+    }
+    @keyframes floatY{
+      0%,100%{ transform: translateY(0); }
+      50%{ transform: translateY(-5px); }
+    }
+    @keyframes fall{
+      0%{ transform: translateY(-8px) rotate(0deg); opacity:.0; }
+      10%{ opacity:.85; }
+      100%{ transform: translateY(56px) rotate(220deg); opacity:0; }
+    }
+
+    /* ลดแอนิเมชันเมื่อผู้ใช้เปิดโหมดลดการเคลื่อนไหว */
+    @media (prefers-reduced-motion: reduce){
+      .anniv-banner .line,
+      .anniv-banner .ico{ animation: none; }
+      #promoBox .confetti i{ animation: none; display:none; }
     }
   </style>
 </head>
@@ -69,19 +123,17 @@
     </h2>
     <div class="card">
       <h3>👤 หน้าผู้ใช้งาน</h3>
-      <div id="greeting" aria-live="polite">กำลังโหลด...</div>
-      <p id="balance" aria-live="polite">ยอดคงเหลือ: ... เครดิต</p>
+      <div id="greeting">กำลังโหลด...</div>
+      <p id="balance">ยอดคงเหลือ: ... เครดิต</p>
 
       <h3>สแกน QR ร้านค้าเพื่อชำระ</h3>
-      <button id="scanBtn" aria-controls="qr-reader">📷 สแกน QR ร้านค้า</button>
-      <div id="qr-reader" style="width:300px;display:none;margin-top:1rem;"></div>
+      <button id="scanBtn">📷 สแกน QR ร้านค้า</button>
+      <div id="qr-reader" style="width: 300px; display: none; margin-top: 1rem;"></div>
 
-      <div id="payBox" style="display:none;margin-top:1rem;" class="card" aria-live="polite">
-        <div id="merchantInfo" class="message" role="status"></div>
+      <div id="payBox" style="display:none; margin-top:1rem;" class="card">
+        <div id="merchantInfo" class="message"></div>
         <label for="payAmount">จำนวนเครดิตที่ต้องการจ่าย</label>
-        <input
-          type="number" id="payAmount" inputmode="numeric" min="1" step="1"
-          placeholder="จำนวนเต็ม ≥ 1" autocomplete="off" />
+        <input type="number" id="payAmount" min="1" step="1" inputmode="numeric" pattern="\d*" placeholder="จำนวนเต็ม ≥ 1" />
         <button id="payBtn" class="btn-success">ยืนยันชำระ</button>
       </div>
 
@@ -98,8 +150,8 @@
       <div class="row"><span>เวลา</span><strong id="mTime">-</strong></div>
       <div class="row"><span>เครดิตคงเหลือของคุณ</span><strong id="mRemain">-</strong></div>
 
-      <!-- กล่องประกาศเฉลิมฉลอง -->
-      <div id="promoBox" aria-live="polite"></div>
+      <!-- กล่องข้อความพิเศษ (เวอร์ชันใหม่: แบนเนอร์ + คอนเฟตตี้เบา) -->
+      <div id="promoBox" class="message success" aria-live="polite"></div>
 
       <div class="actions">
         <button id="closeModal" class="btn-secondary">ปิด</button>
@@ -107,18 +159,23 @@
     </div>
   </div>
 
-  <!-- html5-qrcode สำหรับสแกน QR -->
+  <!-- html5-qrcode สำหรับสแกน QR ด้วยกล้องบนเบราว์เซอร์ -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
   <script>
     // ====== กำหนดข้อความโปรโมชัน/ประกาศพิเศษ ======
     const PROMO_MESSAGE = '19th AMGT Happy Anniversary';
+    const PROMO_ICON = '🎁';
 
+    // helper
     function withLoading(btn, action) {
-      if (!btn) return Promise.resolve(action());
-      btn.classList.add('loading'); btn.disabled = true;
-      return Promise.resolve().then(action).finally(() => {
-        btn.classList.remove('loading'); btn.disabled = false;
-      });
+      btn.classList.add('loading');
+      btn.disabled = true;
+      return Promise.resolve()
+        .then(action)
+        .finally(() => {
+          btn.classList.remove('loading');
+          btn.disabled = false;
+        });
     }
 
     // ดึงข้อมูลผู้ใช้ปัจจุบัน
@@ -127,12 +184,13 @@
       .then(res => { if (!res.ok) { window.location.href = '/login.html'; } return res.json(); })
       .then(user => {
         window.currentUser = user;
-        const displayName = user.name || user.username || 'ผู้ใช้';
-        document.getElementById('greeting').textContent = `รหัสผู้ใช้งาน: ${displayName}`;
+        const displayName = user.name || user.username;
+        document.getElementById('greeting').textContent = `รหัสผู้ใช้งาน: ${displayName} `;
         document.getElementById('balance').textContent = `ยอดคงเหลือ: ${user.credit} เครดิต`;
       })
       .catch(() => { window.location.href = '/login.html'; });
 
+    // Helper: เรียกดูชื่อร้านจาก id (fallback เป็น id ถ้าไม่สำเร็จ)
     async function lookupUserBasic(id){
       try{
         const res = await fetch(`/api/user-basic?id=${encodeURIComponent(id)}`);
@@ -146,11 +204,11 @@
     const overlay = document.getElementById('paymentOverlay');
     const closeModalBtn = document.getElementById('closeModal');
     const promoBox = document.getElementById('promoBox');
-    let lastFocusEl = null;
 
-    function renderAnniversaryBanner(){
+    function renderAnniversaryBanner(noteText){
+      // บล็อกภายใน promoBox (แทนที่เดิม)
       return `
-        <div class="anniv-banner" role="status" aria-live="polite" aria-label="ข้อความเฉลิมฉลอง">
+        <div class="anniv-banner" role="status" aria-live="polite">
           <div class="line line-top">19th AMGT</div>
           <div class="line line-main">
             <span class="ico gift" aria-hidden="true">🎁</span>
@@ -160,7 +218,8 @@
         </div>
         <div class="confetti" aria-hidden="true">
           <i></i><i></i><i></i><i></i><i></i><i></i>
-        </div>`;
+        </div>
+      `;
     }
 
     function openPaymentModal({merchantName, amount, timeText, remain, note}){
@@ -169,35 +228,32 @@
       document.getElementById('mTime').textContent = timeText;
       document.getElementById('mRemain').textContent = `${remain} เครดิต`;
 
+      // ใส่แบนเนอร์เฉลิมฉลอง (แทนที่กล่องข้อความพิเศษเดิม)
       if (note && String(note).trim()) {
-        promoBox.innerHTML = renderAnniversaryBanner();
+        promoBox.innerHTML = renderAnniversaryBanner(note);
         promoBox.style.display = 'block';
       } else {
         promoBox.style.display = 'none';
         promoBox.innerHTML = '';
       }
-      lastFocusEl = document.activeElement;
+
       overlay.style.display = 'flex';
       closeModalBtn.focus();
     }
-    function closePaymentModal(){
-      overlay.style.display = 'none';
-      if (lastFocusEl && typeof lastFocusEl.focus === 'function') lastFocusEl.focus();
-    }
+    function closePaymentModal(){ overlay.style.display = 'none'; }
     closeModalBtn.addEventListener('click', closePaymentModal);
     overlay.addEventListener('click', (e)=>{ if(e.target === overlay) closePaymentModal(); });
-    window.addEventListener('keydown', (e)=>{ if(overlay.style.display==='flex' && e.key==='Escape') closePaymentModal(); });
 
-    // ---- Utilities base64url -> JSON ----
+    // ---- Utilities สำหรับ base64url -> JSON (ใช้บนเบราว์เซอร์) ----
     function base64UrlToJson(b64url) {
-      const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((b64url.length + 3) % 4);
+      const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/')
+        + '==='.slice((b64url.length + 3) % 4); // padding ให้ครบ
       const text = atob(b64);
       return JSON.parse(text);
     }
 
     // สแกน QR ร้านค้า
     let qrScanner = null;
-    let scanning = false;
     let lastPayload = null;
     let lastMerchantId = null;
     let lastMerchantName = null;
@@ -205,65 +261,62 @@
     const scanBtn = document.getElementById('scanBtn');
     scanBtn.addEventListener('click', async () => {
       await withLoading(scanBtn, async () => {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          alert('อุปกรณ์นี้ไม่รองรับการใช้กล้องสำหรับสแกน QR');
-          return;
-        }
-        try{
-          if (!qrScanner) qrScanner = new Html5Qrcode('qr-reader');
-          const qrReader = document.getElementById('qr-reader');
-          const payBox = document.getElementById('payBox');
-          const infoBox = document.getElementById('merchantInfo');
+        if (!qrScanner) qrScanner = new Html5Qrcode('qr-reader');
+        const qrReader = document.getElementById('qr-reader');
+        const payBox = document.getElementById('payBox');
+        const infoBox = document.getElementById('merchantInfo');
 
-          payBox.style.display = 'none';
-          infoBox.textContent = '';
-          infoBox.className = 'message';
-          qrReader.style.display = 'block';
-          lastPayload = null; lastMerchantId = null; lastMerchantName = null; scanning = true;
+        payBox.style.display = 'none';
+        infoBox.textContent = '';
+        qrReader.style.display = 'block';
 
-          const onScanSuccess = async (decodedText) => {
-            if (!scanning) return; // debounce
-            scanning = false;
-            try { await qrScanner.stop(); } catch {}
-            qrReader.style.display = 'none';
+        const onScanSuccess = async (decodedText) => {
+          try { await qrScanner.stop(); } catch (e) {}
+          qrReader.style.display = 'none';
 
-            let parsed;
-            try { parsed = JSON.parse(decodedText); }
-            catch { alert('QR ไม่ถูกต้อง'); return; }
+          // รองรับ 2 รูปแบบ: (ใหม่){raw,sig} และ (เดิม){type,to}
+          let parsed;
+          try { parsed = JSON.parse(decodedText); }
+          catch { alert('QR ไม่ถูกต้อง'); return; }
 
-            let merchantId;
-            if (parsed && parsed.raw && parsed.sig) {
-              try {
-                const data = base64UrlToJson(parsed.raw);
-                if (data?.type !== 'merchant-receive' || !data?.to) { alert('QR ไม่ถูกต้อง'); return; }
-                merchantId = data.to;
-                lastPayload = JSON.stringify({ raw: parsed.raw, sig: parsed.sig });
-              } catch { alert('QR ไม่ถูกต้อง'); return; }
-            } else if (parsed?.type === 'merchant-receive' && parsed?.to) {
-              merchantId = parsed.to; lastPayload = decodedText;
-            } else { alert('QR นี้ไม่ใช่ของร้านค้าสำหรับรับเครดิต'); return; }
+          let merchantId;
+          if (parsed && parsed.raw && parsed.sig) {
+            try {
+              const data = base64UrlToJson(parsed.raw);
+              if (data?.type !== 'merchant-receive' || !data?.to) {
+                alert('QR ไม่ถูกต้อง'); return;
+              }
+              merchantId = data.to;
+              lastPayload = JSON.stringify({ raw: parsed.raw, sig: parsed.sig });
+            } catch {
+              alert('QR ไม่ถูกต้อง'); return;
+            }
+          } else if (parsed?.type === 'merchant-receive' && parsed?.to) {
+            merchantId = parsed.to;
+            lastPayload = decodedText;
+          } else {
+            alert('QR นี้ไม่ใช่ของร้านค้าสำหรับรับเครดิต');
+            return;
+          }
 
-            lastMerchantId = merchantId;
-            lastMerchantName = await lookupUserBasic(merchantId);
-            infoBox.className = 'message success';
-            infoBox.textContent = `จะชำระให้ร้าน: ${lastMerchantName}`;
-            document.getElementById('payBox').style.display = 'block';
-          };
+          lastMerchantId = merchantId;
+          lastMerchantName = await lookupUserBasic(merchantId);
 
-          const onScanFailure = () => {}; // เงียบ ๆ
+          infoBox.className = 'message success';
+          infoBox.textContent = `จะชำระให้ร้าน: ${lastMerchantName}`;
+          document.getElementById('payBox').style.display = 'block';
+        };
 
-          await qrScanner.start(
-            { facingMode: 'environment' },
-            { fps: 10, qrbox: { width: 250, height: 250 } },
-            onScanSuccess,
-            onScanFailure
-          );
-        }catch(err){
-          alert('ไม่สามารถเปิดกล้องได้: ' + (err?.message || err));
-          try{ await qrScanner?.stop(); }catch{}
-          document.getElementById('qr-reader').style.display='none';
-          scanning = false;
-        }
+        const onScanFailure = () => { /* สแกนต่อเนื่อง */ };
+
+        await qrScanner.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          onScanSuccess,
+          onScanFailure
+        ).catch(err => {
+          alert('ไม่สามารถเปิดกล้องได้: ' + err);
+        });
       });
     });
 
@@ -271,32 +324,24 @@
     const payBtn = document.getElementById('payBtn');
     payBtn.addEventListener('click', async () => {
       await withLoading(payBtn, async () => {
-        const raw = (document.getElementById('payAmount').value || '').trim();
-        const n = Number(raw);
-        const amount = Number.isFinite(n) ? Math.trunc(n) : NaN;
-
-        if (!Number.isInteger(amount) || amount <= 0) {
+        const raw = document.getElementById('payAmount').value;
+        const amount = Math.trunc(Number(raw));
+        if (!Number.isFinite(amount) || amount <= 0) {
           alert('กรุณากรอกจำนวนเครดิตที่ถูกต้อง (จำนวนเต็ม > 0)');
           return;
         }
-        if (window.currentUser && amount > Number(window.currentUser.credit || 0)) {
+        if (window.currentUser && amount > window.currentUser.credit) {
           alert('เครดิตของคุณไม่พอ');
           return;
         }
-        if (!lastPayload) {
-          alert('ยังไม่ได้สแกน QR ร้านค้า');
-          return;
-        }
-
+        if (!lastPayload) { alert('ยังไม่ได้สแกน QR ร้านค้า'); return; }
         try {
           const res = await fetch('/api/pay-qr', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ payload: lastPayload, amount })
           });
-
-          const isJson = res.headers.get('content-type')?.includes('application/json');
-          const data = await (isJson ? res.json() : res.text());
+          const data = await (res.headers.get('content-type')?.includes('application/json') ? res.json() : res.text());
           if (!res.ok) throw new Error(typeof data === 'string' ? data : (data.message || 'ชำระไม่สำเร็จ'));
 
           // อัปเดตยอดคงเหลือจากเซิร์ฟเวอร์
@@ -304,25 +349,21 @@
           window.currentUser = me;
           document.getElementById('balance').textContent = `ยอดคงเหลือ: ${me.credit} เครดิต`;
 
-          // เวลาไทยอ่านง่าย
-          const timeText = new Intl.DateTimeFormat('th-TH', {
-            dateStyle: 'full', timeStyle: 'medium'
-          }).format(new Date());
-
-          // แสดง Modal สรุปผล + แบนเนอร์เฉลิมฉลอง
+          // แสดง Modal สรุปผล + ข้อความพิเศษ (note)
+          const timeText = new Date().toLocaleString('th-TH');
           openPaymentModal({
-            merchantName: lastMerchantName || lastMerchantId || '-',
+            merchantName: lastMerchantName || lastMerchantId,
             amount,
             timeText,
             remain: me.credit,
             note: PROMO_MESSAGE
           });
 
-          // รีเซ็ตฟอร์ม
+          // รีเซ็ตฟอร์มการจ่าย
           document.getElementById('payAmount').value = '';
           document.getElementById('payBox').style.display = 'none';
         } catch (err) {
-          alert(err?.message || 'เกิดข้อผิดพลาด');
+          alert(err.message || 'เกิดข้อผิดพลาด');
         }
       });
     });
@@ -331,7 +372,6 @@
     const logoutBtn = document.getElementById('logoutBtn');
     logoutBtn.addEventListener('click', () => {
       withLoading(logoutBtn, async () => {
-        try { await qrScanner?.stop(); } catch {}
         await fetch('/logout');
         window.location.href = '/login.html';
       });
