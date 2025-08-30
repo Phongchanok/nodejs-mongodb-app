@@ -113,28 +113,6 @@
       .anniv-banner .ico{ animation: none; }
       #promoBox .confetti i{ animation: none; display:none; }
     }
-
-    /* ===== Confetti (random fall) – behind text ===== */
-    #promoBox { position: relative; } /* อ้างอิงตำแหน่งของ confetti */
-    #promoBox .confetti-box{
-      position:absolute; inset:0; width:100%; height:100%;
-      pointer-events:none; z-index:0; overflow:hidden;
-    }
-    .confetti-piece{
-      position:absolute; width:6px; height:10px; border-radius:2px;
-      opacity:.95; will-change: transform, opacity;
-      animation: confetti-fall linear forwards;
-    }
-    @keyframes confetti-fall{
-      0%   { transform: translateY(-12px) rotate(0deg);   opacity:1; }
-      100% { transform: translateY(100vh) rotate(360deg); opacity:0; }
-    }
-
-    /* ปิดการเคลื่อนไหวเมื่อ reduce motion */
-    @media (prefers-reduced-motion: reduce){
-      #promoBox .confetti-box{ display:none; }
-    }
-
   </style>
 </head>
 <body>
@@ -227,64 +205,44 @@
     const closeModalBtn = document.getElementById('closeModal');
     const promoBox = document.getElementById('promoBox');
 
-  function renderAnniversaryBanner(){
-    return `
-      <div class="anniv-banner" role="status" aria-live="polite">
-        <div class="line line-top">19th AMGT</div>
-        <div class="line line-main">
-          <span class="ico gift" aria-hidden="true">🎁</span>
-          Happy Anniversary
-          <span class="ico coupon" aria-hidden="true">🎊</span>
+    function renderAnniversaryBanner(noteText){
+      // บล็อกภายใน promoBox (แทนที่เดิม)
+      return `
+        <div class="anniv-banner" role="status" aria-live="polite">
+          <div class="line line-top">19th AMGT</div>
+          <div class="line line-main">
+            <span class="ico gift" aria-hidden="true">🎁</span>
+            Happy Anniversary
+            <span class="ico coupon" aria-hidden="true">🎊</span>
+          </div>
         </div>
-      </div>
+        <div class="confetti" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+      `;
+    }
 
-      <!-- เลเยอร์พุ (อยู่หลังตัวหนังสือ) -->
-      <canvas class="fw-canvas"></canvas>
+    function openPaymentModal({merchantName, amount, timeText, remain, note}){
+      document.getElementById('mName').textContent = merchantName;
+      document.getElementById('mAmount').textContent = `${amount} เครดิต`;
+      document.getElementById('mTime').textContent = timeText;
+      document.getElementById('mRemain').textContent = `${remain} เครดิต`;
 
-      <!-- เลเยอร์คอนเฟตตี้แบบสุ่ม (แทนของเดิม) -->
-      <div class="confetti-box"></div>
-    `;
-  }
+      // ใส่แบนเนอร์เฉลิมฉลอง (แทนที่กล่องข้อความพิเศษเดิม)
+      if (note && String(note).trim()) {
+        promoBox.innerHTML = renderAnniversaryBanner(note);
+        promoBox.style.display = 'block';
+      } else {
+        promoBox.style.display = 'none';
+        promoBox.innerHTML = '';
+      }
 
-
-
-function openPaymentModal({merchantName, amount, timeText, remain, note}){
-  document.getElementById('mName').textContent = merchantName;
-  document.getElementById('mAmount').textContent = `${amount} เครดิต`;
-  document.getElementById('mTime').textContent = timeText;
-  document.getElementById('mRemain').textContent = `${remain} เครดิต`;
-
-  // ใส่แบนเนอร์เฉลิมฉลอง (ต้องทำก่อนค่อย start เอฟเฟกต์)
-  if (note && String(note).trim()) {
-    promoBox.innerHTML = renderAnniversaryBanner(note);
-    promoBox.style.display = 'block';
-
-    // ⬇️ เริ่มพุ + คอนเฟตตี้แบบสุ่ม หลัง DOM ของ promoBox พร้อมแล้ว
-    Fireworks.mount(promoBox);
-    Confetti.start(promoBox);
-  } else {
-    // ไม่มี note ก็หยุดเอฟเฟกต์และซ่อน
-    Fireworks.unmount();
-    Confetti.stop();
-    promoBox.style.display = 'none';
-    promoBox.innerHTML = '';
-  }
-
-  overlay.style.display = 'flex';
-  closeModalBtn.focus();
-}
-
-function closePaymentModal(){
-  // หยุดเอฟเฟกต์ทั้งหมดเมื่อปิด
-  Fireworks.unmount();
-  Confetti.stop();
-  overlay.style.display = 'none';
-}
-
-closeModalBtn.addEventListener('click', closePaymentModal);
-overlay.addEventListener('click', (e)=>{ if(e.target === overlay) closePaymentModal(); });
-
-
+      overlay.style.display = 'flex';
+      closeModalBtn.focus();
+    }
+    function closePaymentModal(){ overlay.style.display = 'none'; }
+    closeModalBtn.addEventListener('click', closePaymentModal);
+    overlay.addEventListener('click', (e)=>{ if(e.target === overlay) closePaymentModal(); });
 
     // ---- Utilities สำหรับ base64url -> JSON (ใช้บนเบราว์เซอร์) ----
     function base64UrlToJson(b64url) {
@@ -418,63 +376,6 @@ overlay.addEventListener('click', (e)=>{ if(e.target === overlay) closePaymentMo
         window.location.href = '/login.html';
       });
     });
-  
-/* ===== Confetti (random DOM) ===== */
-const Confetti = (() => {
-  let timer = null;
-  let host = null;
-  const COLORS = ["#f59e0b","#ef4444","#3b82f6","#10b981","#a855f7","#eab308"];
-
-  function spawnOnce(box, count = 20){
-    const h = box.clientHeight || window.innerHeight;
-    for(let i=0;i<count;i++){
-      const el = document.createElement("div");
-      el.className = "confetti-piece";
-      // สุ่มตำแหน่ง/ขนาด/ความเร็ว/มุม
-      el.style.left = (Math.random()*100).toFixed(2) + "%";
-      el.style.background = COLORS[(Math.random()*COLORS.length)|0];
-      el.style.width  = (5 + Math.random()*4).toFixed(1) + "px";
-      el.style.height = (8 + Math.random()*6).toFixed(1) + "px";
-      const dur = 1.4 + Math.random()*1.8;         // 1.4–3.2s
-      const rot = 180 + Math.random()*360;         // หมุนมากขึ้น
-      const delay = (Math.random()*0.35).toFixed(2);
-      el.style.animationDuration = dur + "s";
-      el.style.animationDelay = delay + "s";
-      el.style.transform = `translateY(-12px) rotate(${rot}deg)`;
-      // ลบเมื่อหมดอายุ
-      el.addEventListener("animationend", () => el.remove());
-      box.appendChild(el);
-    }
-    // กัน DOM บวม (เผื่อเครื่องช้า)
-    const MAX_CHILD = 250;
-    while (box.children.length > MAX_CHILD) {
-      box.firstElementChild?.remove();
-    }
-  }
-
-  function start(container){
-    if (timer) return;
-    host = container.querySelector(".confetti-box");
-    if (!host) return;
-    // ยิงเป็นจังหวะ
-    spawnOnce(host, 22);              // เริ่มชุดแรก
-    timer = setInterval(() => spawnOnce(host, 18 + (Math.random()*10|0)), 1200);
-  }
-  function stop(){
-    if (timer) { clearInterval(timer); timer = null; }
-    if (host) { host.innerHTML = ""; }
-  }
-
-  // หยุดตอนแท็บไม่โฟกัส
-  document.addEventListener("visibilitychange", () => {
-    if (!host) return;
-    if (document.hidden) stop();
-    else start(host.parentElement);
-  });
-
-  return { start, stop };
-})();
-
   </script>
 </body>
 </html>
