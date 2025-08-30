@@ -616,27 +616,26 @@ app.post('/api/settlement/commit',
 
 /**
  * GET /api/settlement/:sid/export-ledger.csv
- * ส่งออกบรรทัดธุรกรรม pay ของรอบ :sid
- * ?includeNames=1 เพื่อเติมคอลัมน์อ่านง่าย (from_role/username/name, to_role/username/name)
+ * ค่าเริ่มต้น: ใส่ชื่อ/username/role (human-friendly)
+ * ถ้าใส่ ?machine=1 → คืนเฉพาะ *_id (machine-friendly)
  */
 app.get('/api/settlement/:sid/export-ledger.csv',
   ensureAuthenticated, ensureRole('admin'),
   async (req, res) => {
     try {
       const sid = req.params.sid;
-      const includeNames = parseBool(req.query.includeNames);
+      const machine = parseBool(req.query.machine); // true -> ลีน
 
       const txs = await Transaction.find({ settlement_id: sid, type: 'pay' })
         .select('createdAt from to amount settled settlement_id settled_at')
         .lean();
 
-      // หา merchant เพื่อแสดงหัวรายงาน
       const merchantId = (sid.split('_m')[1] || '').trim();
       const merchant = merchantId
         ? await User.findById(merchantId).select('name username role').lean()
         : null;
 
-      // เตรียม batch lookup
+      // batch lookup เพื่อ map id -> {role, username, name}
       const allIds = [];
       for (const t of txs) {
         if (t.from) allIds.push(String(t.from));
@@ -645,17 +644,17 @@ app.get('/api/settlement/:sid/export-ledger.csv',
       if (merchantId) allIds.push(merchantId);
       const usersMap = await loadUsersMapByIds(allIds);
 
-      // header
-      const baseCols = [
+      // กำหนดหัวคอลัมน์
+      const machineCols = [
         'settlement_id','merchant_id','merchant_name',
         'tx_id','created_at_utc','created_at_th',
         'from_id','to_id','amount','settled','settled_at_th'
       ];
-      const nameCols = [
+      const humanExtra = [
         'from_role','from_username','from_name',
         'to_role','to_username','to_name'
       ];
-      const cols = includeNames ? [...baseCols, ...nameCols] : baseCols;
+      const cols = machine ? machineCols : [...machineCols.slice(0,7), ...humanExtra, ...machineCols.slice(7)];
 
       const lines = [];
       lines.push(cols.join(','));
@@ -673,34 +672,45 @@ app.get('/api/settlement/:sid/export-ledger.csv',
         const fromId = t.from ? String(t.from) : '';
         const toId   = t.to   ? String(t.to)   : '';
 
-        const row = [
-          csvEscape(sid),
-          csvEscape(merchantId),
-          csvEscape(merchantName),
-          csvEscape(String(t._id)),
-          csvEscape(t.createdAt ? new Date(t.createdAt).toISOString() : ''),
-          csvEscape(createdTH),
-          csvEscape(fromId),
-          csvEscape(toId),
-          csvEscape(t.amount ?? ''),
-          csvEscape(t.settled ? 'true' : 'false'),
-          csvEscape(settledTH)
-        ];
-
-        if (includeNames) {
+        if (machine) {
+          // โหมดลีน: เฉพาะ _id
+          lines.push([
+            csvEscape(sid),
+            csvEscape(merchantId),
+            csvEscape(merchantName),
+            csvEscape(String(t._id)),
+            csvEscape(t.createdAt ? new Date(t.createdAt).toISOString() : ''),
+            csvEscape(createdTH),
+            csvEscape(fromId),
+            csvEscape(toId),
+            csvEscape(t.amount ?? ''),
+            csvEscape(t.settled ? 'true' : 'false'),
+            csvEscape(settledTH)
+          ].join(','));
+        } else {
+          // โหมดอ่านง่ายเป็นค่าเริ่มต้น
           const fu = usersMap.get(fromId) || {};
           const tu = usersMap.get(toId)   || {};
-          row.push(
-            csvEscape(fu.role || ''),
-            csvEscape(fu.username || ''),
-            csvEscape(fu.name || ''),
-            csvEscape(tu.role || ''),
-            csvEscape(tu.username || ''),
-            csvEscape(tu.name || '')
-          );
+          lines.push([
+            csvEscape(sid),
+            csvEscape(merchantId),
+            csvEscape(merchantName),
+            csvEscape(String(t._id)),
+            csvEscape(t.createdAt ? new Date(t.createdAt).toISOString() : ''),
+            csvEscape(createdTH),
+            csvEscape(fromId),                 // คง id ไว้
+            csvEscape(fu.role || ''),          // from_role
+            csvEscape(fu.username || ''),      // from_username
+            csvEscape(fu.name || ''),          // from_name
+            csvEscape(toId),                   // to_id
+            csvEscape(tu.role || ''),          // to_role
+            csvEscape(tu.username || ''),      // to_username
+            csvEscape(tu.name || ''),          // to_name
+            csvEscape(t.amount ?? ''),
+            csvEscape(t.settled ? 'true' : 'false'),
+            csvEscape(settledTH)
+          ].join(','));
         }
-
-        lines.push(row.join(','));
       }
 
       const csvText = lines.join('\n');
@@ -714,17 +724,18 @@ app.get('/api/settlement/:sid/export-ledger.csv',
   }
 );
 
+
 /**
  * GET /api/settlement/:sid/export-summary.csv
- * สรุปรวมของรอบ :sid
- * ?includeNames=1 เพื่อเติม merchant_username/merchant_role
+ * ค่าเริ่มต้น: ใส่ชื่อ/username/role ของ merchant
+ * ถ้าใส่ ?machine=1 → ไม่ใส่ฟิลด์ username/role (เหลือ name ตามเดิม)
  */
 app.get('/api/settlement/:sid/export-summary.csv',
   ensureAuthenticated, ensureRole('admin'),
   async (req, res) => {
     try {
       const sid = req.params.sid;
-      const includeNames = parseBool(req.query.includeNames);
+      const machine = parseBool(req.query.machine);
 
       const merchantId = (sid.split('_m')[1] || '').trim();
       const merchant = merchantId
@@ -745,7 +756,6 @@ app.get('/api/settlement/:sid/export-summary.csv',
       const firstAt  = agg[0]?.first_at ? new Date(agg[0].first_at) : null;
       const lastAt   = agg[0]?.last_at  ? new Date(agg[0].last_at)  : null;
 
-      // เดาวันจาก sid: dYYYY-MM-DD_m...
       const dateMatch = /^d(\d{4}-\d{2}-\d{2})_m/.exec(sid);
       const dateStr = dateMatch ? dateMatch[1] : '';
 
@@ -753,30 +763,42 @@ app.get('/api/settlement/:sid/export-summary.csv',
         'settlement_id','merchant_id','merchant_name','date',
         'tx_count','gross_amount','net_amount','first_tx_th','last_tx_th'
       ];
-      const nameCols = ['merchant_username','merchant_role'];
-      const cols = includeNames ? [...baseCols, ...nameCols] : baseCols;
+      const humanExtra = ['merchant_username','merchant_role'];
+      const cols = machine ? baseCols : [...baseCols.slice(0,3), ...humanExtra, ...baseCols.slice(3)];
 
       const mName = merchant ? (merchant.name || merchant.username) : '';
       const firstTh = firstAt ? firstAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }) : '';
-      const lastTh  = lastAt  ? lastAt.toLocaleString('th-TH',  { timeZone: 'Asia/Bangkok' }) : '';
+      const lastTh  = lastAt  ? lastAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }) : '';
 
-      const row = [
-        csvEscape(sid),
-        csvEscape(merchantId),
-        csvEscape(mName),
-        csvEscape(dateStr),
-        csvEscape(tx_count),
-        csvEscape(gross),
-        csvEscape(gross), // Lite: net = gross
-        csvEscape(firstTh),
-        csvEscape(lastTh)
-      ];
-
-      if (includeNames) {
-        row.push(
-          csvEscape(merchant ? merchant.username || '' : ''),
-          csvEscape(merchant ? merchant.role || '' : '')
-        );
+      let row;
+      if (machine) {
+        // โหมดลีน
+        row = [
+          csvEscape(sid),
+          csvEscape(merchantId),
+          csvEscape(mName),
+          csvEscape(dateStr),
+          csvEscape(tx_count),
+          csvEscape(gross),
+          csvEscape(gross), // net = gross (Lite)
+          csvEscape(firstTh),
+          csvEscape(lastTh)
+        ];
+      } else {
+        // โหมดอ่านง่ายค่าเริ่มต้น
+        row = [
+          csvEscape(sid),
+          csvEscape(merchantId),
+          csvEscape(mName),
+          csvEscape(merchant ? merchant.username || '' : ''), // merchant_username
+          csvEscape(merchant ? merchant.role || '' : ''),     // merchant_role
+          csvEscape(dateStr),
+          csvEscape(tx_count),
+          csvEscape(gross),
+          csvEscape(gross), // net = gross (Lite)
+          csvEscape(firstTh),
+          csvEscape(lastTh)
+        ];
       }
 
       const csvText = [cols.join(','), row.join(',')].join('\n');
@@ -789,6 +811,7 @@ app.get('/api/settlement/:sid/export-summary.csv',
     }
   }
 );
+
 
 
 // Start
