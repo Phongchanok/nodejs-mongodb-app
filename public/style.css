@@ -469,7 +469,7 @@
     .w-full { width: 100%; }
 
     .amount-number {
-    color: var(--danger-color); /* สีแดง (#ef4444) */
+    color: #ef4444; /* สีแดง (#ef4444) */
     font-size: 1.2rem;
     font-weight: 700;
     }
