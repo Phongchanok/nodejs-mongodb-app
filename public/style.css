@@ -468,18 +468,16 @@
     .gap-2 { gap: 1rem; }
     .w-full { width: 100%; }
 
-    #mAmount {
-      color: #ef4444;
-    }
-
-    .amount-number {
-    color: #ef4444; /* สีแดง (#ef4444) */
-    font-size: 1.2rem;
+    /* สไตล์ยอดชำระ */
+    #mAmount .amount-number {
+    color: var(--danger-color) !important; /* บังคับใช้สีแดง */
+    font-size: 1.5rem;
     font-weight: 700;
     }
 
-    .amount-unit {
-    color: var(--text-primary); /* สีดำตามปกติ */
-    margin-left: 0.25rem;
+    #mAmount .amount-unit {
+      color: var(--text-primary) !important; /* ดำปกติ */
+      margin-left: 0.25rem;
     }
+
 
