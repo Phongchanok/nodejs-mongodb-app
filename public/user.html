@@ -154,7 +154,7 @@
     <div class="modal">
       <h4 id="paymentTitle">✅ ชำระเครดิตสำเร็จ</h4>
       <div class="row"><span>ร้านค้า</span><strong id="mName">-</strong></div>
-      <div class="row"><span>ยอดชำระ</span><strong id="mAmount">-</strong></div>
+      <div class="row"><span>ยอดชำระ</span><strong id="mAmount"><span class="amount-number">...</span><span class="amount-unit">เครดิต</span></strong></div>
       <div class="row"><span>เวลา</span><strong id="mTime">-</strong></div>
       <div class="row"><span>เครดิตคงเหลือของคุณ</span><strong id="mRemain">-</strong></div>
 
@@ -232,7 +232,10 @@
 
     function openPaymentModal({merchantName, amount, timeText, remain, note}){
       document.getElementById('mName').textContent = merchantName;
-      document.getElementById('mAmount').textContent = `${amount} เครดิต`;
+      document.getElementById('mAmount').innerHTML = `
+      <span class="amount-number">${amount}</span>
+      <span class="amount-unit">เครดิต</span>
+      `;
       document.getElementById('mTime').textContent = timeText;
       document.getElementById('mRemain').textContent = `${remain} เครดิต`;
 
