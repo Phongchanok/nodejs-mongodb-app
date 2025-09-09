@@ -468,6 +468,10 @@
     .gap-2 { gap: 1rem; }
     .w-full { width: 100%; }
 
+    #mAmount {
+      color: #ef4444;
+    }
+
     .amount-number {
     color: #ef4444; /* สีแดง (#ef4444) */
     font-size: 1.2rem;
