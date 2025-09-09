@@ -1,6 +1,6 @@
 {
   "name": "กระเป๋าเครดิต",
-  "short_name": "E-Wallet",
+  "short_name": "E-Coupons",
   "start_url": "/login.html",
   "display": "standalone",
   "background_color": "#ffffff",
